@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>팀준 운영진 질문</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #fff; --ink: #14213d; --sub: #5b6577; --line: #dde2ea;
+    --navy: #1d3a6e; --done: #1f7a4d; --done-bg: #e7f4ec; --edit: #b45309; --edit-bg: #fdf1e2;
+    --empty: #8a93a3; --red: #c62828; --yellow: #ffd23f;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    word-break: keep-all; overflow-wrap: anywhere;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 0 16px 96px; }
+  header.top {
+    position: sticky; top: 0; z-index: 5; background: var(--bg);
+    padding: 12px 16px 8px; border-bottom: 1px solid var(--line);
+  }
+  header.top .in { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 8px; font-weight: 700; }
+  .who { float: right; font-size: 13px; color: var(--sub); font-weight: 400; margin-top: 3px; }
+  .who button { font-size: 13px; padding: 0 0 0 6px; border: 0; background: none; color: var(--sub); }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--done); }
+  .count { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 14px; color: var(--sub); }
+  .count b { color: var(--ink); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--card); }
+  .seg button { border: 0; background: none; padding: 6px 12px; font-size: 14px; color: var(--sub); }
+  .seg button.on { background: var(--navy); color: #fff; }
+
+  .notice { background: var(--card); border: 1px solid var(--line); border-radius: 12px; margin: 16px 0 0; }
+  .notice summary { padding: 12px 16px; font-weight: 600; font-size: 15px; list-style: none; }
+  .notice summary::-webkit-details-marker { display: none; }
+  .notice summary::after { content: "펼치기"; float: right; font-weight: 400; font-size: 13px; color: var(--sub); }
+  .notice[open] summary::after { content: "접기"; }
+  .notice .body { padding: 0 16px 14px; font-size: 14px; white-space: pre-wrap; color: var(--sub); }
+  .notice a { color: var(--navy); }
+
+  h2 { font-size: 15px; margin: 24px 0 8px; color: var(--sub); font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .card.done { border-left: 4px solid var(--done); }
+  .card.editing { border-left: 4px solid var(--edit); }
+  .st { display: inline-block; font-size: 13px; padding: 2px 8px; border-radius: 6px; margin-bottom: 6px; }
+  .st.done { background: var(--done-bg); color: var(--done); }
+  .st.editing { background: var(--edit-bg); color: var(--edit); }
+  .st.empty { background: #eef0f4; color: var(--empty); }
+  .q { font-weight: 600; margin: 0 0 6px; }
+  .notes { margin: 0 0 8px; padding: 0; list-style: none; font-size: 13px; color: var(--sub); }
+  .notes li { margin: 2px 0; }
+  .ans { background: #f7f9fc; border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; margin: 8px 0; }
+  textarea {
+    width: 100%; min-height: 110px; font: inherit; font-size: 16px; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 8px; resize: vertical; background: #fff; color: var(--ink);
+  }
+  textarea:focus, input:focus { outline: 2px solid var(--navy); outline-offset: 0; }
+  .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  button { font: inherit; cursor: pointer; }
+  .btn { border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 8px; padding: 9px 16px; font-size: 15px; }
+  .btn.main { background: var(--yellow); border-color: var(--yellow); font-weight: 600; }
+  .btn.red { color: #fff; background: var(--red); border-color: var(--red); }
+  .btn:disabled { opacity: .5; }
+  .warn { background: var(--edit-bg); color: var(--edit); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-top: 8px; }
+  .warn .ans { background: #fff; color: var(--ink); }
+  .msg { font-size: 13px; color: var(--sub); margin-top: 6px; }
+  .empty-all { text-align: center; color: var(--sub); padding: 40px 0; }
+
+  .gate { max-width: 360px; margin: 18vh auto 0; padding: 0 16px; }
+  .gate h1 { font-size: 22px; margin-bottom: 4px; }
+  .gate p { color: var(--sub); margin: 0 0 16px; font-size: 14px; }
+  .gate label { display: block; font-size: 14px; margin: 12px 0 4px; }
+  .gate input { width: 100%; font-size: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+  .gate .btn { width: 100%; margin-top: 16px; padding: 12px; }
+  .err { color: var(--red); font-size: 14px; margin-top: 8px; min-height: 20px; }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: #fff;
+    padding: 10px 16px; border-radius: 8px; font-size: 14px; z-index: 9; max-width: calc(100% - 32px); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// 저장 창구 주소: Apps Script '웹 앱'으로 배포하고 나온 …/exec 주소를 넣는다.
+var API = 'PASTE_APPS_SCRIPT_URL';
+var POLL_MS = 30000;
+
+var DEMO = /[?&]demo\b/.test(location.search);
+var S = { code: '', name: '', data: null, filter: 'left', open: {}, drafts: {}, bases: {}, conflict: {}, busy: {}, err: '' };
+var $app = document.getElementById('app');
+
+function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+function load(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function linkify(s) { return esc(s).replace(/https?:\/\/[^\s<]+/g, function (u) { return '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>'; }); }
+function ago(t) {
+  if (!t) return '';
+  var m = Math.round((Date.now() - t) / 60000);
+  if (m < 1) return '방금';
+  if (m < 60) return m + '분 전';
+  var h = Math.round(m / 60);
+  if (h < 24) return h + '시간 전';
+  var d = new Date(t);
+  return (d.getMonth() + 1) + '/' + d.getDate();
+}
+function toast(t) {
+  var el = document.createElement('div'); el.className = 'toast'; el.textContent = t;
+  document.body.appendChild(el); setTimeout(function () { el.remove(); }, 2500);
+}
+
+// ---------- 저장 창구와 주고받기 ----------
+function call(action, body) {
+  body = body || {};
+  body.action = action; body.code = S.code;
+  if (DEMO) return demoCall(body);
+  if (action === 'list') {
+    return fetch(API + '?action=list&code=' + encodeURIComponent(S.code)).then(function (r) { return r.json(); });
+  }
+  return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); });
+}
+
+function refresh(quiet) {
+  return call('list').then(function (d) {
+    if (!d.ok) {
+      if (d.error === 'code') { store('tj_code', null); S.code = ''; S.err = '입장 코드가 맞지 않습니다'; }
+      else if (!quiet) toast('불러오기 실패: ' + d.error);
+      render(); return;
+    }
+    S.data = d; render();
+  }).catch(function () { if (!quiet) toast('인터넷 연결을 확인해 주세요'); });
+}
+
+// ---------- 화면 ----------
+function render() {
+  if (!S.code || !S.name) return renderGate();
+  if (!S.data) { $app.innerHTML = '<div class="gate"><p>불러오는 중…</p></div>'; return; }
+
+  // 쓰고 있는 칸의 글과 커서를 지키며 다시 그린다
+  var act = document.activeElement, actRow = act && act.dataset ? act.dataset.row : null, sel = actRow ? [act.selectionStart, act.selectionEnd] : null;
+  var y = window.scrollY;
+
+  var items = S.data.items, total = items.length;
+  var done = items.filter(function (it) { return it.answer; }).length;
+  var pct = total ? Math.round(done / total * 100) : 0;
+  var h = '';
+  h += '<header class="top"><div class="in">';
+  h += '<h1>팀준 운영진 질문 <span class="who">' + esc(S.name) + '<button data-act="rename">이름 바꾸기</button></span></h1>';
+  h += '<div class="bar"><i style="width:' + pct + '%"></i></div>';
+  h += '<div class="count"><span><b>' + done + '</b> / ' + total + ' 작성됨 · 남은 ' + (total - done) + '</span>';
+  h += '<span class="seg"><button data-act="filter" data-v="left" class="' + (S.filter === 'left' ? 'on' : '') + '">남은 것</button>';
+  h += '<button data-act="filter" data-v="all" class="' + (S.filter === 'all' ? 'on' : '') + '">전체</button></span></div>';
+  h += '</div></header><div class="wrap">';
+
+  if (S.data.notice && S.data.notice.length) {
+    h += '<details class="notice"><summary>사이트 주소와 관리자 들어가는 법</summary><div class="body">' + S.data.notice.map(linkify).join('\n\n') + '</div></details>';
+  }
+
+  var shown = items.filter(function (it) { return S.filter === 'all' || !it.answer || S.open[it.row]; });
+  if (!shown.length) h += '<div class="empty-all">모든 질문에 답이 달렸습니다. 고마워요!<br><br><button class="btn" data-act="filter" data-v="all">전체 답 보기</button></div>';
+  var lastCat = null;
+  shown.forEach(function (it) {
+    if (it.cat !== lastCat) { h += '<h2>' + esc(it.cat) + '</h2>'; lastCat = it.cat; }
+    h += card(it);
+  });
+  h += '</div>';
+  $app.innerHTML = h;
+  window.scrollTo(0, y);
+  if (actRow) {
+    var t = $app.querySelector('textarea[data-row="' + actRow + '"]');
+    if (t) { t.focus({ preventScroll: true }); try { t.setSelectionRange(sel[0], sel[1]); } catch (e) {} }
+  }
+}
+
+function card(it) {
+  var mine = S.open[it.row];
+  var otherEditing = it.editing && it.editing.name !== S.name;
+  var cls = it.answer ? 'done' : (otherEditing ? 'editing' : '');
+  var h = '<div class="card ' + cls + '" id="q' + it.row + '">';
+  if (it.answer) h += '<span class="st done">✅ ' + esc(it.by || '시트에서 작성') + (it.at ? ' · ' + ago(it.at) : '') + '</span>';
+  else if (otherEditing) h += '<span class="st editing">✏️ ' + esc(it.editing.name) + ' 작성 중</span>';
+  else h += '<span class="st empty">아직 답 없음</span>';
+  if (it.answer && otherEditing) h += ' <span class="st editing">✏️ ' + esc(it.editing.name) + ' 고치는 중</span>';
+  h += '<p class="q">' + esc(it.q) + '</p>';
+  if (it.notes.length) h += '<ul class="notes">' + it.notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>';
+
+  if (!mine) {
+    if (it.answer) h += '<div class="ans">' + esc(it.answer) + '</div>';
+    h += '<div class="row"><button class="btn ' + (it.answer ? '' : 'main') + '" data-act="open" data-row="' + it.row + '">' + (it.answer ? '고치기' : '답 쓰기') + '</button></div>';
+  } else {
+    if (otherEditing) h += '<div class="warn">' + esc(it.editing.name) + '님도 지금 이 질문을 쓰고 있어요. 겹치지 않게 말을 맞춰 주세요.</div>';
+    var c = S.conflict[it.row];
+    if (c) {
+      h += '<div class="warn">방금 <b>' + esc(c.by || '다른 분') + '</b>님이 먼저 답을 저장했습니다.' + (c.answer ? '<div class="ans">' + esc(c.answer) + '</div>' : ' (답을 지웠습니다)') + '어떻게 할까요?</div>';
+      h += '<div class="row"><button class="btn main" data-act="append" data-row="' + it.row + '">그 답 밑에 내 답 덧붙이기</button>';
+      h += '<button class="btn red" data-act="force" data-row="' + it.row + '">내 답으로 덮어쓰기</button>';
+      h += '<button class="btn" data-act="close" data-row="' + it.row + '">내 답 버리기</button></div>';
+    }
+    h += '<textarea data-row="' + it.row + '" placeholder="여기에 답을 써 주세요">' + esc(S.drafts[it.row] || '') + '</textarea>';
+    if (!c) {
+      h += '<div class="row"><button class="btn main" data-act="save" data-row="' + it.row + '"' + (S.busy[it.row] ? ' disabled' : '') + '>' + (S.busy[it.row] ? '저장 중…' : '저장') + '</button>';
+      h += '<button class="btn" data-act="close" data-row="' + it.row + '">취소</button></div>';
+      if (it.answer) h += '<div class="msg">글을 모두 지우고 저장하면 답이 비워집니다.</div>';
+    }
+  }
+  return h + '</div>';
+}
+
+function renderGate() {
+  var h = '<div class="gate"><h1>팀준 운영진 질문</h1><p>운영진이 함께 답을 채우는 곳입니다. 다른 분이 쓴 답이 바로 보여요.</p>';
+  if (!S.code) h += '<label for="code">입장 코드</label><input id="code" autocomplete="off" autocapitalize="off" value="' + esc(load('tj_code_try')) + '">';
+  h += '<label for="name">이름 (답 옆에 표시돼요)</label><input id="name" autocomplete="name" value="' + esc(S.name || load('tj_name')) + '" placeholder="예: 김민수">';
+  h += '<button class="btn main" data-act="enter">들어가기</button><div class="err">' + esc(S.err) + '</div></div>';
+  $app.innerHTML = h;
+}
+
+// ---------- 누르기 ----------
+function findItem(row) { return S.data.items.filter(function (it) { return it.row === row; })[0]; }
+
+$app.addEventListener('input', function (e) {
+  if (e.target.tagName === 'TEXTAREA') S.drafts[e.target.dataset.row] = e.target.value;
+});
+
+$app.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-act]'); if (!b) return;
+  var act = b.dataset.act, row = Number(b.dataset.row);
+  if (act === 'enter') {
+    var ci = document.getElementById('code'), ni = document.getElementById('name');
+    var name = ni.value.trim();
+    if (ci) { S.code = ci.value.trim(); }
+    if (!S.code) { S.err = '입장 코드를 넣어 주세요'; return renderGate(); }
+    if (!name) { S.err = '이름을 넣어 주세요'; return renderGate(); }
+    S.name = name; S.err = '';
+    store('tj_code', S.code); store('tj_name', name);
+    render(); refresh();
+  } else if (act === 'rename') {
+    S.name = ''; render();
+  } else if (act === 'filter') {
+    S.filter = b.dataset.v; render(); window.scrollTo(0, 0);
+  } else if (act === 'open') {
+    var it = findItem(row);
+    S.open[row] = true; S.drafts[row] = it.answer || ''; S.bases[row] = it.answer || ''; delete S.conflict[row];
+    render();
+    var t = $app.querySelector('textarea[data-row="' + row + '"]'); if (t) t.focus();
+    call('claim', { row: row, name: S.name });
+  } else if (act === 'close') {
+    delete S.open[row]; delete S.drafts[row]; delete S.conflict[row];
+    call('release', { row: row, name: S.name });
+    refresh(true); render();
+  } else if (act === 'save' || act === 'force') {
+    save(row, act === 'force');
+  } else if (act === 'append') {
+    var c = S.conflict[row];
+    S.drafts[row] = (c.answer ? c.answer + '\n\n' : '') + '(' + S.name + ') ' + (S.drafts[row] || '');
+    S.bases[row] = c.answer; delete S.conflict[row];
+    save(row, false);
+  }
+});
+
+function save(row, force) {
+  S.busy[row] = true; render();
+  call('save', { row: row, name: S.name, answer: (S.drafts[row] || '').trim(), base: S.bases[row], force: force })
+    .then(function (d) {
+      S.busy[row] = false;
+      if (d.ok) {
+        delete S.open[row]; delete S.drafts[row]; delete S.conflict[row];
+        toast('저장했습니다'); return refresh(true);
+      }
+      if (d.error === 'conflict') { S.conflict[row] = { answer: d.answer, by: d.by }; render(); return; }
+      toast('저장 실패: ' + d.error); render();
+    })
+    .catch(function () { S.busy[row] = false; toast('저장 실패: 인터넷 연결을 확인해 주세요'); render(); });
+}
+
+// 30초마다, 그리고 화면으로 돌아올 때 다른 분의 답을 새로 불러온다
+setInterval(function () { if (S.code && S.name && !document.hidden) refresh(true); }, POLL_MS);
+document.addEventListener('visibilitychange', function () { if (!document.hidden && S.code && S.name) refresh(true); });
+
+// ---------- 시험용 가짜 창구 (?demo) ----------
+var DEMO_DB = null;
+function demoCall(b) {
+  if (!DEMO_DB) DEMO_DB = {
+    notice: ['https://example.com/', '관리자 페이지 들어가는 법:\n맨 밑 운영진 누르기 (시험용 안내)'],
+    items: [
+      { row: 7, cat: '가. 꼭 먼저', q: '창립 연일이 언제인가요?', notes: ['왜 여쭙나요: 홈 첫 화면 숫자가 틀리게 나옵니다'], answer: '2015년 3월', by: '김회장', at: Date.now() - 600000, editing: null },
+      { row: 10, cat: '가. 꼭 먼저', q: '홈 소개 글을 한두 줄 써 주실 수 있을까요?', notes: ['왜 여쭙나요: 처음 오는 분이 가장 먼저 읽는 글입니다', "답이 없으면: '처음이어도 괜찮아요'로 둡니다"], answer: '', by: '', at: null, editing: { name: '박총무', at: Date.now() } },
+      { row: 13, cat: '가. 꼭 먼저', q: '지금 쓰시는 회원 명단을 받을 수 있을까요?', notes: [], answer: '', by: '', at: null, editing: null },
+      { row: 19, cat: '나. 돈·규칙', q: '12월부터 연회비 18만 원으로 바꾸시나요?', notes: ['답이 없으면: 12월까지는 월 2만 원으로 둡니다'], answer: '', by: '', at: null, editing: null }
+    ]
+  };
+  var db = DEMO_DB;
+  return new Promise(function (res) {
+    setTimeout(function () {
+      if (b.code !== 'demo') return res({ ok: false, error: 'code' });
+      var it = db.items.filter(function (x) { return x.row === b.row; })[0];
+      if (b.action === 'list') return res({ ok: true, notice: db.notice, items: JSON.parse(JSON.stringify(db.items)) });
+      if (b.action === 'claim') { it.editing = { name: b.name, at: Date.now() }; return res({ ok: true }); }
+      if (b.action === 'release') { if (it.editing && it.editing.name === b.name) it.editing = null; return res({ ok: true }); }
+      if (b.action === 'save') {
+        if (!b.force && it.answer !== (b.base || '')) return res({ ok: false, error: 'conflict', answer: it.answer, by: it.by });
+        it.answer = b.answer; it.by = b.answer ? b.name : ''; it.at = b.answer ? Date.now() : null; it.editing = null;
+        return res({ ok: true });
+      }
+    }, 150);
+  });
+}
+
+// ---------- 시작 ----------
+S.code = load('tj_code'); S.name = load('tj_name');
+render();
+if (S.code && S.name) refresh();
+</script>
+</body>
+</html>
