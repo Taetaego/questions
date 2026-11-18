@@ -186,7 +186,7 @@ function render() {
   if (!S.live) h += '<div class="warn">답을 불러오는 중입니다…</div>';
 
   if (S.notice.length) {
-    h += '<details class="notice"><summary>먼저 읽어 주세요</summary><div class="body">' + S.notice.map(linkify).join('\n\n') + '</div></details>';
+    h += '<details class="notice" open><summary>먼저 읽어 주세요</summary><div class="body">' + S.notice.map(linkify).join('\n\n') + '</div></details>';
   }
   var shown = items.filter(function (q) { return S.filter === 'all' || !ans(q.id).answer || S.open[q.id]; });
   if (!shown.length) h += '<div class="empty-all">모든 질문에 답이 달렸습니다. 고마워요!<br><br><button class="btn" data-act="filter" data-v="all">전체 답 보기</button></div>';
