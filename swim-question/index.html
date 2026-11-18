@@ -102,6 +102,10 @@ function load(k) { try { return localStorage.getItem(k) || ''; } catch (e) { ret
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function linkify(s) { return esc(s).replace(/https?:\/\/[^\s<]+/g, function (u) { return '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>'; }); }
 function me() { return S.name || '익명'; }
+// 같은 '익명'끼리도 누가 쓰는 중인지 가리도록 브라우저마다 짧은 구분값을 붙인다(화면에는 # 앞만 보임)
+var SID = load('qp_sid') || Math.random().toString(36).slice(2, 6); store('qp_sid', SID);
+function meTag() { return me().slice(0, 25) + '#' + SID; }
+function shown(n) { return String(n || '').replace(/#[a-z0-9]{1,6}$/, ''); }
 function ago(t) {
   if (!t) return '';
   var m = Math.round((Date.now() - t) / 60000);
@@ -136,16 +140,16 @@ async function connect() {
 }
 
 function claim(id) {
-  var v = { name: me(), at: Date.now() };
+  var v = { name: meTag(), at: Date.now() };
   if (DEMO) { demo.claim(id, v); return; }
   var r = fb.ref(id + '/editing');
   fb.set(r, v).catch(function () {});
   fb.onDisconnect(r).remove();
 }
 function release(id) {
-  if (DEMO) { demo.release(id, me()); return; }
+  if (DEMO) { demo.release(id, meTag()); return; }
   var e = ans(id).editing;
-  if (e && e.name === me()) fb.remove(fb.ref(id + '/editing')).catch(function () {});
+  if (e && e.name === meTag()) fb.remove(fb.ref(id + '/editing')).catch(function () {});
   fb.onDisconnect(fb.ref(id + '/editing')).cancel();
 }
 
@@ -203,12 +207,12 @@ function render() {
 
 function card(q) {
   var a = ans(q.id), mine = S.open[q.id], ed = editingOf(q.id);
-  var other = ed && ed.name !== me();
+  var other = ed && ed.name !== meTag();
   var h = '<div class="card ' + (a.answer ? 'done' : (other ? 'editing' : '')) + '" id="' + q.id + '">';
   if (a.answer) h += '<span class="st done">✅ ' + esc(a.by || '익명') + (a.at ? ' · ' + ago(a.at) : '') + '</span>';
-  else if (other) h += '<span class="st editing">✏️ ' + esc(ed.name) + ' 작성 중</span>';
+  else if (other) h += '<span class="st editing">✏️ ' + esc(shown(ed.name)) + ' 작성 중</span>';
   else h += '<span class="st empty">아직 답 없음</span>';
-  if (a.answer && other) h += ' <span class="st editing">✏️ ' + esc(ed.name) + ' 고치는 중</span>';
+  if (a.answer && other) h += ' <span class="st editing">✏️ ' + esc(shown(ed.name)) + ' 고치는 중</span>';
   h += '<p class="q">' + esc(q.q) + '</p>';
   if (q.notes && q.notes.length) h += '<ul class="notes">' + q.notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>';
 
@@ -216,7 +220,7 @@ function card(q) {
     if (a.answer) h += '<div class="ans">' + esc(a.answer) + '</div>';
     h += '<div class="row"><button class="btn ' + (a.answer ? '' : 'main') + '" data-act="open" data-id="' + q.id + '">' + (a.answer ? '수정하기' : '답 쓰기') + '</button></div>';
   } else {
-    if (other) h += '<div class="warn">' + esc(ed.name) + '님도 지금 이 질문을 쓰고 있어요. 겹치지 않게 말을 맞춰 주세요.</div>';
+    if (other) h += '<div class="warn">' + esc(shown(ed.name)) + '님도 지금 이 질문을 쓰고 있어요. 겹치지 않게 말을 맞춰 주세요.</div>';
     var c = S.conflict[q.id];
     if (c) {
       h += '<div class="warn">방금 <b>' + esc(c.by || '다른 분') + '</b>님이 먼저 답을 저장했습니다.' + (c.answer ? '<div class="ans">' + esc(c.answer) + '</div>' : ' (답을 지웠습니다)') + '어떻게 할까요?</div>';
