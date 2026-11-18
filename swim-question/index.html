@@ -138,7 +138,6 @@ function refresh(quiet) {
 
 // ---------- 화면 ----------
 function render() {
-  if (!S.name) return renderGate();
   if (!S.data) { $app.innerHTML = '<div class="gate"><p>불러오는 중…</p></div>'; return; }
 
   // 쓰고 있는 칸의 글과 커서를 지키며 다시 그린다
@@ -150,7 +149,7 @@ function render() {
   var pct = total ? Math.round(done / total * 100) : 0;
   var h = '';
   h += '<header class="top"><div class="in">';
-  h += '<h1>' + esc(TITLE) + ' <span class="who">' + esc(S.name) + '<button data-act="rename">이름 바꾸기</button></span></h1>';
+  h += '<h1>' + esc(TITLE) + ' <span class="who">' + (S.name ? esc(S.name) + '<button data-act="rename">이름 바꾸기</button>' : '<button data-act="rename">이름 넣기</button>') + '</span></h1>';
   h += '<div class="bar"><i style="width:' + pct + '%"></i></div>';
   h += '<div class="count"><span><b>' + done + '</b> / ' + total + ' 작성됨 · 남은 ' + (total - done) + '</span>';
   h += '<span class="seg"><button data-act="filter" data-v="left" class="' + (S.filter === 'left' ? 'on' : '') + '">남은 것</button>';
@@ -179,7 +178,7 @@ function render() {
 
 function card(it) {
   var mine = S.open[it.row];
-  var otherEditing = it.editing && it.editing.name !== S.name;
+  var otherEditing = it.editing && it.editing.name !== me();
   var cls = it.answer ? 'done' : (otherEditing ? 'editing' : '');
   var h = '<div class="card ' + cls + '" id="q' + it.row + '">';
   if (it.answer) h += '<span class="st done">✅ ' + esc(it.by || '시트에서 작성') + (it.at ? ' · ' + ago(it.at) : '') + '</span>';
@@ -211,14 +210,8 @@ function card(it) {
   return h + '</div>';
 }
 
-function renderGate() {
-  var h = '<div class="gate"><h1>' + esc(TITLE) + '</h1><p>여러 분이 함께 답을 채우는 곳입니다. 다른 분이 쓴 답이 바로 보여요.</p>';
-  h += '<label for="name">이름 (답 옆에 표시돼요)</label><input id="name" autocomplete="name" value="' + esc(S.name || load('tj_name')) + '" placeholder="예: 김민수">';
-  h += '<button class="btn main" data-act="enter">들어가기</button><div class="err">' + esc(S.err) + '</div></div>';
-  $app.innerHTML = h;
-}
-
 // ---------- 누르기 ----------
+function me() { return S.name || '익명'; }
 function findItem(row) { return S.data.items.filter(function (it) { return it.row === row; })[0]; }
 
 $app.addEventListener('input', function (e) {
@@ -228,15 +221,9 @@ $app.addEventListener('input', function (e) {
 $app.addEventListener('click', function (e) {
   var b = e.target.closest('[data-act]'); if (!b) return;
   var act = b.dataset.act, row = Number(b.dataset.row);
-  if (act === 'enter') {
-    var ni = document.getElementById('name');
-    var name = ni.value.trim();
-    if (!name) { S.err = '이름을 넣어 주세요'; return renderGate(); }
-    S.name = name; S.err = '';
-    store('tj_name', name);
-    render(); refresh();
-  } else if (act === 'rename') {
-    S.name = ''; render();
+  if (act === 'rename') {
+    var n = window.prompt('이름 (답 옆에 표시돼요. 비우면 익명)', S.name);
+    if (n !== null) { S.name = n.trim().slice(0, 30); store('tj_name', S.name || null); render(); }
   } else if (act === 'filter') {
     S.filter = b.dataset.v; render(); window.scrollTo(0, 0);
   } else if (act === 'open') {
@@ -244,16 +231,16 @@ $app.addEventListener('click', function (e) {
     S.open[row] = true; S.drafts[row] = it.answer || ''; S.bases[row] = it.answer || ''; delete S.conflict[row];
     render();
     var t = $app.querySelector('textarea[data-row="' + row + '"]'); if (t) t.focus();
-    call('claim', { row: row, name: S.name });
+    call('claim', { row: row, name: me() });
   } else if (act === 'close') {
     delete S.open[row]; delete S.drafts[row]; delete S.conflict[row];
-    call('release', { row: row, name: S.name });
+    call('release', { row: row, name: me() });
     refresh(true); render();
   } else if (act === 'save' || act === 'force') {
     save(row, act === 'force');
   } else if (act === 'append') {
     var c = S.conflict[row];
-    S.drafts[row] = (c.answer ? c.answer + '\n\n' : '') + '(' + S.name + ') ' + (S.drafts[row] || '');
+    S.drafts[row] = (c.answer ? c.answer + '\n\n' : '') + '(' + me() + ') ' + (S.drafts[row] || '');
     S.bases[row] = c.answer; delete S.conflict[row];
     save(row, false);
   }
@@ -261,7 +248,7 @@ $app.addEventListener('click', function (e) {
 
 function save(row, force) {
   S.busy[row] = true; render();
-  call('save', { row: row, name: S.name, answer: (S.drafts[row] || '').trim(), base: S.bases[row], force: force })
+  call('save', { row: row, name: me(), answer: (S.drafts[row] || '').trim(), base: S.bases[row], force: force })
     .then(function (d) {
       S.busy[row] = false;
       if (d.ok) {
@@ -275,8 +262,8 @@ function save(row, force) {
 }
 
 // 30초마다, 그리고 화면으로 돌아올 때 다른 분의 답을 새로 불러온다
-setInterval(function () { if (S.name && !document.hidden) refresh(true); }, POLL_MS);
-document.addEventListener('visibilitychange', function () { if (!document.hidden && S.name) refresh(true); });
+setInterval(function () { if (!document.hidden) refresh(true); }, POLL_MS);
+document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(true); });
 
 // ---------- 시험용 가짜 창구 (?demo) ----------
 var DEMO_DB = null;
@@ -308,7 +295,7 @@ function demoCall(b) {
 // ---------- 시작 ----------
 S.name = load('tj_name');
 render();
-if (S.name) refresh();
+refresh();
 </script>
 </body>
 </html>
