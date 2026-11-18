@@ -84,20 +84,24 @@
 </head>
 <body>
 <div id="app"></div>
-<script>
-// 저장 창구 주소: Apps Script '웹 앱'으로 배포하고 나온 …/exec 주소를 넣는다.
-var API = 'https://script.google.com/macros/s/AKfycbwoavEmMriGTxYRtwJavI4rJZ_X89Fvn0n3xy60IbF_R6lQWQeF9kMMI_PNirjVRiH6/exec';
+<script type="module">
+// 질문 페이지: 질문은 같은 폴더의 questions.json(GitHub), 답은 Firebase Realtime Database.
+// 아래 세 값은 '새 질문 페이지.sh'가 채운다.
 var TITLE = '팀준 운영진 질문';
-var POLL_MS = 30000;
+var PAGE = 'swim-question';          // Firebase 안에서 이 페이지 답이 들어가는 칸 이름 (pages/<PAGE>/answers)
+var DB_URL = 'https://question-pages-45aae-default-rtdb.asia-southeast1.firebasedatabase.app';          // Firebase Realtime Database 주소
+var EDITING_MS = 5 * 60000;     // '작성 중' 표시가 저절로 풀리는 시간
 
 var DEMO = /[?&]demo\b/.test(location.search);
-var S = { code: '', name: '', data: null, filter: 'all', open: {}, drafts: {}, bases: {}, conflict: {}, busy: {}, err: '' };
+var S = { name: '', qs: null, notice: [], answers: {}, filter: 'all', open: {}, drafts: {}, bases: {}, conflict: {}, busy: {}, live: false };
 var $app = document.getElementById('app');
+var fb = null; // { db, ref, set, remove, onValue, runTransaction, onDisconnect }
 
 function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
 function load(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function linkify(s) { return esc(s).replace(/https?:\/\/[^\s<]+/g, function (u) { return '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>'; }); }
+function me() { return S.name || '익명'; }
 function ago(t) {
   if (!t) return '';
   var m = Math.round((Date.now() - t) / 60000);
@@ -112,190 +116,217 @@ function toast(t) {
   var el = document.createElement('div'); el.className = 'toast'; el.textContent = t;
   document.body.appendChild(el); setTimeout(function () { el.remove(); }, 2500);
 }
-
-// ---------- 저장 창구와 주고받기 ----------
-function call(action, body) {
-  body = body || {};
-  body.action = action; body.code = S.code;
-  if (DEMO) return demoCall(body);
-  if (action === 'list') {
-    return fetch(API + '?action=list&code=' + encodeURIComponent(S.code)).then(function (r) { return r.json(); });
-  }
-  return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
-    .then(function (r) { return r.json(); });
+function ans(id) { return S.answers[id] || {}; }
+function editingOf(id) {
+  var e = ans(id).editing;
+  return e && e.name && Date.now() - (e.at || 0) < EDITING_MS ? e : null;
 }
 
-function refresh(quiet) {
-  return call('list').then(function (d) {
-    if (!d.ok) {
-      if (d.error === 'code') { store('tj_code', null); S.code = ''; S.err = '입장 코드가 맞지 않습니다'; }
-      else if (!quiet) toast('불러오기 실패: ' + d.error);
-      render(); return;
-    }
-    S.data = d; render();
-  }).catch(function () { if (!quiet) toast('인터넷 연결을 확인해 주세요'); });
+// ---------- 저장소(Firebase) ----------
+async function connect() {
+  if (DEMO) return demoConnect();
+  var base = 'https://www.gstatic.com/firebasejs/10.12.2/';
+  var app = await import(base + 'firebase-app.js');
+  var d = await import(base + 'firebase-database.js');
+  var db = d.getDatabase(app.initializeApp({ databaseURL: DB_URL }));
+  fb = { db: db, ref: function (p) { return d.ref(db, 'pages/' + PAGE + '/answers' + (p ? '/' + p : '')); },
+         set: d.set, remove: d.remove, runTransaction: d.runTransaction, onDisconnect: d.onDisconnect };
+  d.onValue(fb.ref(), function (snap) { S.answers = snap.val() || {}; S.live = true; render(); },
+    function (err) { toast('답을 불러오지 못했습니다: ' + err.message); });
+}
+
+function claim(id) {
+  var v = { name: me(), at: Date.now() };
+  if (DEMO) { demo.claim(id, v); return; }
+  var r = fb.ref(id + '/editing');
+  fb.set(r, v).catch(function () {});
+  fb.onDisconnect(r).remove();
+}
+function release(id) {
+  if (DEMO) { demo.release(id, me()); return; }
+  var e = ans(id).editing;
+  if (e && e.name === me()) fb.remove(fb.ref(id + '/editing')).catch(function () {});
+  fb.onDisconnect(fb.ref(id + '/editing')).cancel();
+}
+
+// base: 쓰기 시작할 때 본 답. 그사이 다른 사람이 바꿨으면 force 없이는 저장하지 않는다.
+function saveAnswer(id, text, base, force) {
+  if (DEMO) return demo.save(id, text, base, force);
+  var seen = null;
+  return fb.runTransaction(fb.ref(id), function (cur) {
+    var curText = cur && cur.answer ? cur.answer : '';
+    if (!force && curText !== (base || '')) { seen = cur; return; } // 그만둠
+    return text ? { answer: text, by: me(), at: Date.now() } : null;
+  }).then(function (res) {
+    if (res.committed) { fb.onDisconnect(fb.ref(id + '/editing')).cancel(); return { ok: true }; }
+    return { ok: false, conflict: true, answer: seen && seen.answer || '', by: seen && seen.by || '' };
+  });
 }
 
 // ---------- 화면 ----------
 function render() {
-  if (!S.data) { $app.innerHTML = '<div class="gate"><p>불러오는 중…</p></div>'; return; }
-
-  // 쓰고 있는 칸의 글과 커서를 지키며 다시 그린다
-  var act = document.activeElement, actRow = act && act.dataset ? act.dataset.row : null, sel = actRow ? [act.selectionStart, act.selectionEnd] : null;
+  if (!S.qs) { $app.innerHTML = '<div class="gate"><p>불러오는 중…</p></div>'; return; }
+  var act = document.activeElement, actId = act && act.dataset ? act.dataset.id : null, sel = actId ? [act.selectionStart, act.selectionEnd] : null;
   var y = window.scrollY;
 
-  var items = S.data.items, total = items.length;
-  var done = items.filter(function (it) { return it.answer; }).length;
+  var items = S.qs, total = items.length;
+  var done = items.filter(function (q) { return ans(q.id).answer; }).length;
   var pct = total ? Math.round(done / total * 100) : 0;
-  var h = '';
-  h += '<header class="top"><div class="in">';
+  var h = '<header class="top"><div class="in">';
   h += '<h1>' + esc(TITLE) + ' <span class="who">' + (S.name ? esc(S.name) + '<button data-act="rename">이름 바꾸기</button>' : '<button data-act="rename">이름 넣기</button>') + '</span></h1>';
   h += '<div class="bar"><i style="width:' + pct + '%"></i></div>';
   h += '<div class="count"><span><b>' + done + '</b> / ' + total + ' 작성됨 · 남은 ' + (total - done) + '</span>';
   h += '<span class="seg"><button data-act="filter" data-v="all" class="' + (S.filter === 'all' ? 'on' : '') + '">전체</button>';
   h += '<button data-act="filter" data-v="left" class="' + (S.filter === 'left' ? 'on' : '') + '">남은 것</button></span></div>';
   h += '</div></header><div class="wrap">';
+  if (!S.live) h += '<div class="warn">답을 불러오는 중입니다…</div>';
 
-  if (S.data.notice && S.data.notice.length) {
-    h += '<details class="notice"><summary>먼저 읽어 주세요</summary><div class="body">' + S.data.notice.map(linkify).join('\n\n') + '</div></details>';
+  if (S.notice.length) {
+    h += '<details class="notice"><summary>먼저 읽어 주세요</summary><div class="body">' + S.notice.map(linkify).join('\n\n') + '</div></details>';
   }
-
-  var shown = items.filter(function (it) { return S.filter === 'all' || !it.answer || S.open[it.row]; });
+  var shown = items.filter(function (q) { return S.filter === 'all' || !ans(q.id).answer || S.open[q.id]; });
   if (!shown.length) h += '<div class="empty-all">모든 질문에 답이 달렸습니다. 고마워요!<br><br><button class="btn" data-act="filter" data-v="all">전체 답 보기</button></div>';
   var lastCat = null;
-  shown.forEach(function (it) {
-    if (it.cat !== lastCat) { h += '<h2>' + esc(it.cat) + '</h2>'; lastCat = it.cat; }
-    h += card(it);
+  shown.forEach(function (q) {
+    if (q.cat !== lastCat) { h += '<h2>' + esc(q.cat) + '</h2>'; lastCat = q.cat; }
+    h += card(q);
   });
+  if (done) h += '<div class="row" style="justify-content:center;margin-top:24px"><button class="btn" data-act="export">답 내려받기 (엑셀용 CSV)</button></div>';
   h += '</div>';
   $app.innerHTML = h;
   window.scrollTo(0, y);
-  if (actRow) {
-    var t = $app.querySelector('textarea[data-row="' + actRow + '"]');
+  if (actId) {
+    var t = $app.querySelector('textarea[data-id="' + actId + '"]');
     if (t) { t.focus({ preventScroll: true }); try { t.setSelectionRange(sel[0], sel[1]); } catch (e) {} }
   }
 }
 
-function card(it) {
-  var mine = S.open[it.row];
-  var otherEditing = it.editing && it.editing.name !== me();
-  var cls = it.answer ? 'done' : (otherEditing ? 'editing' : '');
-  var h = '<div class="card ' + cls + '" id="q' + it.row + '">';
-  if (it.answer) h += '<span class="st done">✅ ' + esc(it.by || '시트에서 작성') + (it.at ? ' · ' + ago(it.at) : '') + '</span>';
-  else if (otherEditing) h += '<span class="st editing">✏️ ' + esc(it.editing.name) + ' 작성 중</span>';
+function card(q) {
+  var a = ans(q.id), mine = S.open[q.id], ed = editingOf(q.id);
+  var other = ed && ed.name !== me();
+  var h = '<div class="card ' + (a.answer ? 'done' : (other ? 'editing' : '')) + '" id="' + q.id + '">';
+  if (a.answer) h += '<span class="st done">✅ ' + esc(a.by || '익명') + (a.at ? ' · ' + ago(a.at) : '') + '</span>';
+  else if (other) h += '<span class="st editing">✏️ ' + esc(ed.name) + ' 작성 중</span>';
   else h += '<span class="st empty">아직 답 없음</span>';
-  if (it.answer && otherEditing) h += ' <span class="st editing">✏️ ' + esc(it.editing.name) + ' 고치는 중</span>';
-  h += '<p class="q">' + esc(it.q) + '</p>';
-  if (it.notes.length) h += '<ul class="notes">' + it.notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>';
+  if (a.answer && other) h += ' <span class="st editing">✏️ ' + esc(ed.name) + ' 고치는 중</span>';
+  h += '<p class="q">' + esc(q.q) + '</p>';
+  if (q.notes && q.notes.length) h += '<ul class="notes">' + q.notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>';
 
   if (!mine) {
-    if (it.answer) h += '<div class="ans">' + esc(it.answer) + '</div>';
-    h += '<div class="row"><button class="btn ' + (it.answer ? '' : 'main') + '" data-act="open" data-row="' + it.row + '">' + (it.answer ? '수정하기' : '답 쓰기') + '</button></div>';
+    if (a.answer) h += '<div class="ans">' + esc(a.answer) + '</div>';
+    h += '<div class="row"><button class="btn ' + (a.answer ? '' : 'main') + '" data-act="open" data-id="' + q.id + '">' + (a.answer ? '수정하기' : '답 쓰기') + '</button></div>';
   } else {
-    if (otherEditing) h += '<div class="warn">' + esc(it.editing.name) + '님도 지금 이 질문을 쓰고 있어요. 겹치지 않게 말을 맞춰 주세요.</div>';
-    var c = S.conflict[it.row];
+    if (other) h += '<div class="warn">' + esc(ed.name) + '님도 지금 이 질문을 쓰고 있어요. 겹치지 않게 말을 맞춰 주세요.</div>';
+    var c = S.conflict[q.id];
     if (c) {
       h += '<div class="warn">방금 <b>' + esc(c.by || '다른 분') + '</b>님이 먼저 답을 저장했습니다.' + (c.answer ? '<div class="ans">' + esc(c.answer) + '</div>' : ' (답을 지웠습니다)') + '어떻게 할까요?</div>';
-      h += '<div class="row"><button class="btn main" data-act="append" data-row="' + it.row + '">그 답 밑에 내 답 덧붙이기</button>';
-      h += '<button class="btn red" data-act="force" data-row="' + it.row + '">내 답으로 덮어쓰기</button>';
-      h += '<button class="btn" data-act="close" data-row="' + it.row + '">내 답 버리기</button></div>';
+      h += '<div class="row"><button class="btn main" data-act="append" data-id="' + q.id + '">그 답 밑에 내 답 덧붙이기</button>';
+      h += '<button class="btn red" data-act="force" data-id="' + q.id + '">내 답으로 덮어쓰기</button>';
+      h += '<button class="btn" data-act="close" data-id="' + q.id + '">내 답 버리기</button></div>';
     }
-    h += '<textarea data-row="' + it.row + '" placeholder="여기에 답을 써 주세요">' + esc(S.drafts[it.row] || '') + '</textarea>';
+    h += '<textarea data-id="' + q.id + '" placeholder="여기에 답을 써 주세요">' + esc(S.drafts[q.id] || '') + '</textarea>';
     if (!c) {
-      h += '<div class="row"><button class="btn main" data-act="save" data-row="' + it.row + '"' + (S.busy[it.row] ? ' disabled' : '') + '>' + (S.busy[it.row] ? '저장 중…' : '저장') + '</button>';
-      h += '<button class="btn" data-act="close" data-row="' + it.row + '">취소</button></div>';
-      if (it.answer) h += '<div class="msg">글을 모두 지우고 저장하면 답이 비워집니다.</div>';
+      h += '<div class="row"><button class="btn main" data-act="save" data-id="' + q.id + '"' + (S.busy[q.id] ? ' disabled' : '') + '>' + (S.busy[q.id] ? '저장 중…' : '저장') + '</button>';
+      h += '<button class="btn" data-act="close" data-id="' + q.id + '">취소</button></div>';
+      if (a.answer) h += '<div class="msg">글을 모두 지우고 저장하면 답이 비워집니다.</div>';
     }
   }
   return h + '</div>';
 }
 
-// ---------- 누르기 ----------
-function me() { return S.name || '익명'; }
-function findItem(row) { return S.data.items.filter(function (it) { return it.row === row; })[0]; }
+function exportCsv() {
+  var rows = [['분류', '질문', '답', '작성자', '작성 시간']];
+  S.qs.forEach(function (q) {
+    var a = ans(q.id);
+    rows.push([q.cat, q.q, a.answer || '', a.answer ? (a.by || '') : '', a.at ? new Date(a.at).toLocaleString('ko-KR') : '']);
+  });
+  var csv = '﻿' + rows.map(function (r) { return r.map(function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = TITLE + ' 답.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+}
 
+// ---------- 누르기 ----------
 $app.addEventListener('input', function (e) {
-  if (e.target.tagName === 'TEXTAREA') S.drafts[e.target.dataset.row] = e.target.value;
+  if (e.target.tagName === 'TEXTAREA') S.drafts[e.target.dataset.id] = e.target.value;
 });
 
 $app.addEventListener('click', function (e) {
   var b = e.target.closest('[data-act]'); if (!b) return;
-  var act = b.dataset.act, row = Number(b.dataset.row);
+  var act = b.dataset.act, id = b.dataset.id;
   if (act === 'rename') {
     var n = window.prompt('이름 (답 옆에 표시돼요. 비우면 익명)', S.name);
-    if (n !== null) { S.name = n.trim().slice(0, 30); store('tj_name', S.name || null); render(); }
+    if (n !== null) { S.name = n.trim().slice(0, 30); store('qp_name', S.name || null); render(); }
   } else if (act === 'filter') {
     S.filter = b.dataset.v; render(); window.scrollTo(0, 0);
+  } else if (act === 'export') {
+    exportCsv();
   } else if (act === 'open') {
-    var it = findItem(row);
-    S.open[row] = true; S.drafts[row] = it.answer || ''; S.bases[row] = it.answer || ''; delete S.conflict[row];
-    render();
-    var t = $app.querySelector('textarea[data-row="' + row + '"]'); if (t) t.focus();
-    call('claim', { row: row, name: me() });
+    var cur = ans(id).answer || '';
+    S.open[id] = true; S.drafts[id] = cur; S.bases[id] = cur; delete S.conflict[id];
+    claim(id); render();
+    var t = $app.querySelector('textarea[data-id="' + id + '"]'); if (t) t.focus();
   } else if (act === 'close') {
-    delete S.open[row]; delete S.drafts[row]; delete S.conflict[row];
-    call('release', { row: row, name: me() });
-    refresh(true); render();
+    delete S.open[id]; delete S.drafts[id]; delete S.conflict[id];
+    release(id); render();
   } else if (act === 'save' || act === 'force') {
-    save(row, act === 'force');
+    save(id, act === 'force');
   } else if (act === 'append') {
-    var c = S.conflict[row];
-    S.drafts[row] = (c.answer ? c.answer + '\n\n' : '') + '(' + me() + ') ' + (S.drafts[row] || '');
-    S.bases[row] = c.answer; delete S.conflict[row];
-    save(row, false);
+    var c = S.conflict[id];
+    S.drafts[id] = (c.answer ? c.answer + '\n\n' : '') + '(' + me() + ') ' + (S.drafts[id] || '');
+    S.bases[id] = c.answer; delete S.conflict[id];
+    save(id, false);
   }
 });
 
-function save(row, force) {
-  S.busy[row] = true; render();
-  call('save', { row: row, name: me(), answer: (S.drafts[row] || '').trim(), base: S.bases[row], force: force })
-    .then(function (d) {
-      S.busy[row] = false;
-      if (d.ok) {
-        delete S.open[row]; delete S.drafts[row]; delete S.conflict[row];
-        toast('저장했습니다'); return refresh(true);
-      }
-      if (d.error === 'conflict') { S.conflict[row] = { answer: d.answer, by: d.by }; render(); return; }
-      toast('저장 실패: ' + d.error); render();
-    })
-    .catch(function () { S.busy[row] = false; toast('저장 실패: 인터넷 연결을 확인해 주세요'); render(); });
+function save(id, force) {
+  S.busy[id] = true; render();
+  saveAnswer(id, (S.drafts[id] || '').trim(), S.bases[id], force).then(function (d) {
+    S.busy[id] = false;
+    if (d.ok) { delete S.open[id]; delete S.drafts[id]; delete S.conflict[id]; toast('저장했습니다'); render(); return; }
+    S.conflict[id] = { answer: d.answer, by: d.by }; render();
+  }).catch(function (err) { S.busy[id] = false; toast('저장 실패: ' + (err && err.message || '인터넷 연결을 확인해 주세요')); render(); });
 }
 
-// 30초마다, 그리고 화면으로 돌아올 때 다른 분의 답을 새로 불러온다
-setInterval(function () { if (!document.hidden) refresh(true); }, POLL_MS);
-document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(true); });
+// 1분마다 다시 그려 '3분 전' 같은 시간과 작성 중 표시를 새로 맞춘다
+setInterval(function () { if (!Object.keys(S.open).length) render(); }, 60000);
 
-// ---------- 시험용 가짜 창구 (?demo) ----------
-var DEMO_DB = null;
-function demoCall(b) {
-  if (!DEMO_DB) DEMO_DB = {
-    notice: ['https://example.com/', '시험용 안내 글입니다. 시트의 머리줄 위에 적은 글이 여기에 나옵니다.'],
-    items: [
-      { row: 7, cat: '가. 꼭 먼저', q: '시험 질문 1: 이미 답이 달린 질문', notes: ['왜 여쭙나요: 설명 줄은 이렇게 보입니다'], answer: '시험 답', by: '홍길동', at: Date.now() - 600000, editing: null },
-      { row: 10, cat: '가. 꼭 먼저', q: '시험 질문 2: 다른 분이 쓰는 중', notes: ['답이 없으면: 기본값을 이렇게 적어 둡니다'], answer: '', by: '', at: null, editing: { name: '김철수', at: Date.now() } },
-      { row: 13, cat: '나. 시간 될 때', q: '시험 질문 3: 아직 답 없음', notes: [], answer: '', by: '', at: null, editing: null }
-    ]
+// ---------- 시험용 가짜 저장소 (?demo) ----------
+var demo = null;
+function demoConnect() {
+  var db = {
+    q1: { answer: '시험 답', by: '홍길동', at: Date.now() - 600000 },
+    q2: { editing: { name: '김철수', at: Date.now() } }
   };
-  var db = DEMO_DB;
-  return new Promise(function (res) {
-    setTimeout(function () {
-      var it = db.items.filter(function (x) { return x.row === b.row; })[0];
-      if (b.action === 'list') return res({ ok: true, notice: db.notice, items: JSON.parse(JSON.stringify(db.items)) });
-      if (b.action === 'claim') { it.editing = { name: b.name, at: Date.now() }; return res({ ok: true }); }
-      if (b.action === 'release') { if (it.editing && it.editing.name === b.name) it.editing = null; return res({ ok: true }); }
-      if (b.action === 'save') {
-        if (!b.force && it.answer !== (b.base || '')) return res({ ok: false, error: 'conflict', answer: it.answer, by: it.by });
-        it.answer = b.answer; it.by = b.answer ? b.name : ''; it.at = b.answer ? Date.now() : null; it.editing = null;
-        return res({ ok: true });
-      }
-    }, 150);
-  });
+  function push() { S.answers = JSON.parse(JSON.stringify(db)); S.live = true; render(); }
+  demo = {
+    db: db,
+    claim: function (id, v) { db[id] = db[id] || {}; db[id].editing = v; push(); },
+    release: function (id, n) { if (db[id] && db[id].editing && db[id].editing.name === n) delete db[id].editing; push(); },
+    save: function (id, text, base, force) {
+      return new Promise(function (res) { setTimeout(function () {
+        var cur = db[id] || {};
+        if (!force && (cur.answer || '') !== (base || '')) return res({ ok: false, conflict: true, answer: cur.answer || '', by: cur.by || '' });
+        if (text) db[id] = { answer: text, by: me(), at: Date.now() }; else delete db[id];
+        push(); res({ ok: true });
+      }, 150); });
+    }
+  };
+  setTimeout(push, 100);
 }
+var DEMO_QS = { notice: ['https://example.com/', '시험용 안내 글입니다. questions.json의 notice가 여기에 나옵니다.'], questions: [
+  { id: 'q1', cat: '가. 꼭 먼저', q: '시험 질문 1: 이미 답이 달린 질문', notes: ['왜 여쭙나요: 설명 줄은 이렇게 보입니다'] },
+  { id: 'q2', cat: '가. 꼭 먼저', q: '시험 질문 2: 다른 분이 쓰는 중', notes: ['답이 없으면: 기본값을 이렇게 적어 둡니다'] },
+  { id: 'q3', cat: '나. 시간 될 때', q: '시험 질문 3: 아직 답 없음', notes: [] } ] };
 
 // ---------- 시작 ----------
-S.name = load('tj_name');
+S.name = load('qp_name');
 render();
-refresh();
+(DEMO ? Promise.resolve(DEMO_QS) : fetch('questions.json', { cache: 'no-cache' }).then(function (r) { return r.json(); }))
+  .then(function (d) { S.qs = d.questions; S.notice = d.notice || []; render(); return connect(); })
+  .catch(function (err) { $app.innerHTML = '<div class="gate"><p>불러오지 못했습니다: ' + esc(err && err.message) + '</p></div>'; });
+window.__qp = { S: S, demo: function () { return demo; } }; // 점검용
 </script>
 </body>
 </html>
