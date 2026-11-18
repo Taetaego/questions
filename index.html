@@ -137,7 +137,7 @@ function refresh(quiet) {
 
 // ---------- 화면 ----------
 function render() {
-  if (!S.code || !S.name) return renderGate();
+  if (!S.name) return renderGate();
   if (!S.data) { $app.innerHTML = '<div class="gate"><p>불러오는 중…</p></div>'; return; }
 
   // 쓰고 있는 칸의 글과 커서를 지키며 다시 그린다
@@ -212,7 +212,6 @@ function card(it) {
 
 function renderGate() {
   var h = '<div class="gate"><h1>팀준 운영진 질문</h1><p>운영진이 함께 답을 채우는 곳입니다. 다른 분이 쓴 답이 바로 보여요.</p>';
-  if (!S.code) h += '<label for="code">입장 코드</label><input id="code" autocomplete="off" autocapitalize="off" value="' + esc(load('tj_code_try')) + '">';
   h += '<label for="name">이름 (답 옆에 표시돼요)</label><input id="name" autocomplete="name" value="' + esc(S.name || load('tj_name')) + '" placeholder="예: 김민수">';
   h += '<button class="btn main" data-act="enter">들어가기</button><div class="err">' + esc(S.err) + '</div></div>';
   $app.innerHTML = h;
@@ -229,13 +228,11 @@ $app.addEventListener('click', function (e) {
   var b = e.target.closest('[data-act]'); if (!b) return;
   var act = b.dataset.act, row = Number(b.dataset.row);
   if (act === 'enter') {
-    var ci = document.getElementById('code'), ni = document.getElementById('name');
+    var ni = document.getElementById('name');
     var name = ni.value.trim();
-    if (ci) { S.code = ci.value.trim(); }
-    if (!S.code) { S.err = '입장 코드를 넣어 주세요'; return renderGate(); }
     if (!name) { S.err = '이름을 넣어 주세요'; return renderGate(); }
     S.name = name; S.err = '';
-    store('tj_code', S.code); store('tj_name', name);
+    store('tj_name', name);
     render(); refresh();
   } else if (act === 'rename') {
     S.name = ''; render();
@@ -277,8 +274,8 @@ function save(row, force) {
 }
 
 // 30초마다, 그리고 화면으로 돌아올 때 다른 분의 답을 새로 불러온다
-setInterval(function () { if (S.code && S.name && !document.hidden) refresh(true); }, POLL_MS);
-document.addEventListener('visibilitychange', function () { if (!document.hidden && S.code && S.name) refresh(true); });
+setInterval(function () { if (S.name && !document.hidden) refresh(true); }, POLL_MS);
+document.addEventListener('visibilitychange', function () { if (!document.hidden && S.name) refresh(true); });
 
 // ---------- 시험용 가짜 창구 (?demo) ----------
 var DEMO_DB = null;
@@ -295,7 +292,6 @@ function demoCall(b) {
   var db = DEMO_DB;
   return new Promise(function (res) {
     setTimeout(function () {
-      if (b.code !== 'demo') return res({ ok: false, error: 'code' });
       var it = db.items.filter(function (x) { return x.row === b.row; })[0];
       if (b.action === 'list') return res({ ok: true, notice: db.notice, items: JSON.parse(JSON.stringify(db.items)) });
       if (b.action === 'claim') { it.editing = { name: b.name, at: Date.now() }; return res({ ok: true }); }
@@ -310,9 +306,9 @@ function demoCall(b) {
 }
 
 // ---------- 시작 ----------
-S.code = load('tj_code'); S.name = load('tj_name');
+S.name = load('tj_name');
 render();
-if (S.code && S.name) refresh();
+if (S.name) refresh();
 </script>
 </body>
 </html>

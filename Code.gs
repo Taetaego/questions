@@ -10,8 +10,9 @@
  *   → 나온 웹 앱 주소(…/exec)를 개발자에게 전달.
  */
 
-// 입장 코드: 페이지에서 처음 한 번 넣는 코드. 바꾸면 '배포 관리 → 새 버전'으로 다시 배포.
-var ENTRY_CODE = 'teamjun2026';
+// 입장 코드: 비워 두면 링크만 있으면 누구나 들어온다(2026-11-19 저자 결정).
+// 다시 걸려면 값을 넣고 '배포 관리 → 새 버전'으로 다시 배포하고, index.html에도 입력 칸을 되살린다.
+var ENTRY_CODE = '';
 
 // 질문이 든 시트 (주소의 /d/ 뒤 값). 다른 시트를 쓰면 여기만 바꾼다.
 var SHEET_ID = '15DHsI5LlvuYaLpn2Y3KY3B7z2ILGB0n7JP6lYtetmyw';
@@ -33,7 +34,7 @@ function doPost(e) {
 
 function handle_(p) {
   try {
-    if (String(p.code || '') !== ENTRY_CODE) return out_({ ok: false, error: 'code' });
+    if (ENTRY_CODE && String(p.code || '') !== ENTRY_CODE) return out_({ ok: false, error: 'code' });
     var action = p.action || 'list';
     if (action === 'list') return out_(list_());
 
