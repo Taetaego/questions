@@ -86,10 +86,11 @@
 <div id="app"></div>
 <script type="module">
 // 질문 페이지: 질문은 같은 폴더의 questions.json(GitHub), 답은 Firebase Realtime Database.
-// 아래 세 값은 '새 질문 페이지.sh'가 채운다.
+// 아래 네 값은 '새 질문 페이지.sh'가 채운다.
 var TITLE = '팀준 운영진 질문';
 var PAGE = 'swim-question';          // Firebase 안에서 이 페이지 답이 들어가는 칸 이름 (pages/<PAGE>/answers)
 var DB_URL = 'https://question-pages-45aae-default-rtdb.asia-southeast1.firebasedatabase.app';          // Firebase Realtime Database 주소
+var NTFY = 'b9cebeb56f548330-swim-question';          // 마지막 빈 질문에 답을 저장하는 순간 알림을 보낼 ntfy 주제(ntfy.sh/<주제>). 비면 안 보냄
 var EDITING_MS = 5 * 60000;     // '작성 중' 표시가 저절로 풀리는 시간
 
 var DEMO = /[?&]demo\b/.test(location.search);
@@ -284,11 +285,21 @@ $app.addEventListener('click', function (e) {
   }
 });
 
+// 이 저장으로 빈 질문이 0개가 되면(전에 비어 있던 질문에 답을 넣었고, 나머지는 이미 다 참) 만든 사람 휴대폰에 ntfy 알림 한 번.
+// 답 내용은 보내지 않는다. 알림이 안 가도 저장에는 영향 없음.
+function notifyIfFull(id, text, base) {
+  if (DEMO || !NTFY || !S.qs || !text || (base || '')) return;
+  var left = S.qs.filter(function (q) { return q.id !== id && !ans(q.id).answer; }).length;
+  if (left) return;
+  fetch('https://ntfy.sh/' + NTFY, { method: 'POST', body: TITLE + ': 질문 ' + S.qs.length + '개 답이 다 찼습니다', headers: { Tags: 'white_check_mark', Click: location.href.split('?')[0] } }).catch(function () {});
+}
+
 function save(id, force) {
   S.busy[id] = true; render();
-  saveAnswer(id, (S.drafts[id] || '').trim(), S.bases[id], force).then(function (d) {
+  var text = (S.drafts[id] || '').trim(), base = S.bases[id];
+  saveAnswer(id, text, base, force).then(function (d) {
     S.busy[id] = false;
-    if (d.ok) { delete S.open[id]; delete S.drafts[id]; delete S.conflict[id]; toast('저장했습니다'); render(); return; }
+    if (d.ok) { notifyIfFull(id, text, base); delete S.open[id]; delete S.drafts[id]; delete S.conflict[id]; toast('저장했습니다'); render(); return; }
     S.conflict[id] = { answer: d.answer, by: d.by }; render();
   }).catch(function (err) { S.busy[id] = false; toast('저장 실패: ' + (err && err.message || '인터넷 연결을 확인해 주세요')); render(); });
 }
