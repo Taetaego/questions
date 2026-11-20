@@ -52,6 +52,15 @@
   .seen { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--sub); min-height: 36px; }
   .seen .btn { min-width: 7.5em; height: 36px; }
   .txt { white-space: pre-wrap; margin: 0; }
+  .md { white-space: normal; }
+  .md p, .md ul, .md ol, .md blockquote, .md h4 { margin: 0 0 8px; }
+  .md > :last-child { margin-bottom: 0; }
+  .md ul, .md ol { padding-left: 1.4em; }
+  .md li { margin: 2px 0; }
+  .md h4 { font-size: 15px; }
+  .md blockquote { border-left: 3px solid var(--line); padding-left: 10px; color: var(--sub); }
+  .md code { background: rgba(0,0,0,.06); border-radius: 4px; padding: 0 4px; font-size: .92em; }
+  .md hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
   .txt a { color: var(--navy); }
   .reply { margin-top: 10px; background: #f7f9fc; border-left: 3px solid var(--navy); border-radius: 0 8px 8px 0; padding: 8px 12px; }
   .reply .rh { font-size: 13px; color: var(--sub); margin-bottom: 2px; }
@@ -137,7 +146,7 @@
   details.note .nprev { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
   details.note .nmore { flex: none; font-size: 12px; color: var(--sub); }
   details.note[open] .nprev { visibility: hidden; }
-  details.note p { margin-top: 8px; }
+  details.note .md { margin-top: 8px; }
   .sheet-in textarea { min-height: 90px; }
   .topic { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: #f7f9fc; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; word-break: break-all; color: var(--ink); }
 </style>
@@ -174,6 +183,32 @@ function store(k, v) { try { if (v == null) localStorage.removeItem(k); else loc
 function load(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function linkify(s) { return esc(s).replace(/https?:\/\/[^\s<]+/g, function (u) { return '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>'; }); }
+
+// 간단한 마크다운(2026-11-20 저자 '모든 페이지 다 마크다운 적용'). 먼저 글자를 안전하게 바꾼 뒤 모양만 입힌다(손님이 쓴 HTML은 그대로 글자로 보임)
+// 되는 것: **굵게** *기울임* ~~취소선~~ `코드` · 1. 번호 목록 · - 점 목록 · # 제목 · > 인용 · --- 줄 · 주소는 링크 · 빈 줄은 문단
+function mdInline(s) {
+  return linkify(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\w)/g, '$1<i>$2</i>').replace(/~~([^~]+)~~/g, '<s>$1</s>');
+}
+function md(s) {
+  var lines = String(s || '').replace(/\r/g, '').split('\n'), out = [], para = [], list = null;
+  function flushP() { if (para.length) out.push('<p>' + para.map(mdInline).join('<br>') + '</p>'); para = []; }
+  function flushL() { if (list) out.push((list.t === 'ol' ? '<ol' + (list.start > 1 ? ' start="' + list.start + '"' : '') + '>' : '<ul>') + list.items.map(function (x) { return '<li>' + mdInline(x) + '</li>'; }).join('') + '</' + list.t + '>'); list = null; }
+  lines.forEach(function (l) {
+    var m;
+    if (!l.trim()) { flushP(); flushL(); return; }
+    if ((m = l.match(/^\s*(\d+)[.)]\s+(.*)$/))) { flushP(); if (!list || list.t !== 'ol') { flushL(); list = { t: 'ol', start: +m[1], items: [] }; } list.items.push(m[2]); return; }
+    if ((m = l.match(/^\s*[-*•·]\s+(.*)$/))) { flushP(); if (!list || list.t !== 'ul') { flushL(); list = { t: 'ul', items: [] }; } list.items.push(m[1]); return; }
+    flushL();
+    if ((m = l.match(/^\s*#{1,6}\s+(.*)$/))) { flushP(); out.push('<h4>' + mdInline(m[1]) + '</h4>'); return; }
+    if (/^\s*(---+|\*\*\*+)\s*$/.test(l)) { flushP(); out.push('<hr>'); return; }
+    if ((m = l.match(/^\s*>\s?(.*)$/))) { flushP(); out.push('<blockquote>' + mdInline(m[1]) + '</blockquote>'); return; }
+    para.push(l);
+  });
+  flushP(); flushL();
+  return '<div class="md">' + out.join('') + '</div>';
+}
+function mdPlain(s) { return String(s || '').replace(/[*_~`#>]/g, '').replace(/^\s*(\d+[.)]|[-•·])\s+/, '').trim(); }   // 접힌 첫 줄 미리보기용
 function me() { return S.name || '익명'; }
 function ago(t) {
   if (!t) return '';
@@ -392,7 +427,7 @@ function render() {
   h += '</div></header><div class="wrap">';
 
   // 맨 위 한마디는 접어 둔다(2026-11-20 저자 '길게 넣으니 계속 내려야 함'). 첫 줄만 보이고 누르면 펼침. 펼친 상태는 다시 그려도 유지
-  if (S.note) h += '<details class="note" id="note-d"' + (S.noteOpen ? ' open' : '') + '><summary><span class="nh">알려 드려요</span><span class="nprev">' + esc(S.note.split('\n')[0]) + '</span><span class="nmore">' + (S.noteOpen ? '접기' : '펼치기') + '</span></summary><p>' + linkify(S.note) + '</p></details>';
+  if (S.note) h += '<details class="note" id="note-d"' + (S.noteOpen ? ' open' : '') + '><summary><span class="nh">알려 드려요</span><span class="nprev">' + esc(mdPlain(S.note.split('\n').filter(function (x) { return x.trim(); })[0])) + '</span><span class="nmore">' + (S.noteOpen ? '접기' : '펼치기') + '</span></summary>' + md(S.note) + '</details>';
 
   // 새 요청 쓰기
   var busy = !!S.busy;
@@ -437,11 +472,11 @@ function card(r) {
     h += '<button class="btn" data-act="attach" data-id="' + r.id + '"' + (ed.busy ? ' disabled' : '') + '>사진·파일 넣기</button>';
     h += '<button class="btn push" data-act="eclose" data-id="' + r.id + '">취소</button></div>';
     h += '<div class="msg' + (ed.err ? ' bad' : '') + '">' + esc(ed.busy === 'prep' ? '사진 준비 중…' : ed.busy ? '저장 중…' : ed.err || '') + '</div></div>';
-  } else if (r.text) h += '<p class="txt">' + linkify(r.text) + '</p>';
+  } else if (r.text) h += md(r.text);
   var files = Object.keys(r.files || {}).map(function (k) { return { id: k, meta: r.files[k] }; });
   if (files.length && !ed) h += attHtml(files, r.id, false);
   var rp = r.reply && r.reply.text ? r.reply : null;
-  if (rp && !S.rOpen[r.id]) h += '<div class="reply"><div class="rh"><b>답글</b> · ' + ago(rp.at) + '</div><p>' + linkify(rp.text) + '</p></div>';
+  if (rp && !S.rOpen[r.id]) h += '<div class="reply"><div class="rh"><b>답글</b> · ' + ago(rp.at) + '</div>' + md(rp.text) + '</div>';
   if (S.admin && S.rOpen[r.id]) {
     var bz = S.rBusy[r.id];
     h += '<div class="reply-edit"><textarea id="rp-' + r.id + '" data-rid="' + r.id + '" placeholder="무엇을 어떻게 고쳤는지 적어 주세요. 비우고 저장하면 답글이 지워집니다.">' + esc(S.rDraft[r.id] || '') + '</textarea>';
