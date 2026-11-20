@@ -44,6 +44,15 @@
   .notice[open] summary::after { content: "접기"; }
   .notice .body { padding: 0 16px 14px; font-size: 14px; white-space: pre-wrap; color: var(--sub); }
   .notice a { color: var(--navy); }
+  .md { white-space: normal; }
+  .md p, .md ul, .md ol, .md blockquote, .md h4 { margin: 0 0 8px; }
+  .md > :last-child { margin-bottom: 0; }
+  .md ul, .md ol { padding-left: 1.4em; }
+  .md li { margin: 2px 0; }
+  .md h4 { font-size: 15px; }
+  .md blockquote { border-left: 3px solid var(--line); padding-left: 10px; color: var(--sub); }
+  .md code { background: rgba(0,0,0,.06); border-radius: 4px; padding: 0 4px; font-size: .92em; }
+  .md hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 
   h2 { font-size: 15px; margin: 24px 0 8px; color: var(--sub); font-weight: 600; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
@@ -164,6 +173,31 @@ function store(k, v) { try { if (v == null) localStorage.removeItem(k); else loc
 function load(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function linkify(s) { return esc(s).replace(/https?:\/\/[^\s<]+/g, function (u) { return '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>'; }); }
+// 간단한 마크다운(2026-11-20 저자 '모든 페이지 다 마크다운 적용'). 먼저 글자를 안전하게 바꾼 뒤 모양만 입힌다(손님이 쓴 HTML은 그대로 글자로 보임)
+// 되는 것: **굵게** *기울임* ~~취소선~~ `코드` · 1. 번호 목록 · - 점 목록 · # 제목 · > 인용 · --- 줄 · 주소는 링크 · 빈 줄은 문단
+function mdInline(s) {
+  return linkify(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\w)/g, '$1<i>$2</i>').replace(/~~([^~]+)~~/g, '<s>$1</s>');
+}
+function md(s) {
+  var lines = String(s || '').replace(/\r/g, '').split('\n'), out = [], para = [], list = null;
+  function flushP() { if (para.length) out.push('<p>' + para.map(mdInline).join('<br>') + '</p>'); para = []; }
+  function flushL() { if (list) out.push((list.t === 'ol' ? '<ol' + (list.start > 1 ? ' start="' + list.start + '"' : '') + '>' : '<ul>') + list.items.map(function (x) { return '<li>' + mdInline(x) + '</li>'; }).join('') + '</' + list.t + '>'); list = null; }
+  lines.forEach(function (l) {
+    var m;
+    if (!l.trim()) { flushP(); flushL(); return; }
+    if ((m = l.match(/^\s*(\d+)[.)]\s+(.*)$/))) { flushP(); if (!list || list.t !== 'ol') { flushL(); list = { t: 'ol', start: +m[1], items: [] }; } list.items.push(m[2]); return; }
+    if ((m = l.match(/^\s*[-*•·]\s+(.*)$/))) { flushP(); if (!list || list.t !== 'ul') { flushL(); list = { t: 'ul', items: [] }; } list.items.push(m[1]); return; }
+    flushL();
+    if ((m = l.match(/^\s*#{1,6}\s+(.*)$/))) { flushP(); out.push('<h4>' + mdInline(m[1]) + '</h4>'); return; }
+    if (/^\s*(---+|\*\*\*+)\s*$/.test(l)) { flushP(); out.push('<hr>'); return; }
+    if ((m = l.match(/^\s*>\s?(.*)$/))) { flushP(); out.push('<blockquote>' + mdInline(m[1]) + '</blockquote>'); return; }
+    para.push(l);
+  });
+  flushP(); flushL();
+  return '<div class="md">' + out.join('') + '</div>';
+}
+function mdPlain(s) { return String(s || '').replace(/[*_~`#>]/g, '').replace(/^\s*(\d+[.)]|[-•·])\s+/, '').trim(); }   // 접힌 첫 줄 미리보기용
 function me() { return S.name || '익명'; }
 // 같은 '익명'끼리도 누가 쓰는 중인지 가리도록 브라우저마다 짧은 구분값을 붙인다(화면에는 # 앞만 보임)
 var SID = load('qp_sid') || Math.random().toString(36).slice(2, 6); store('qp_sid', SID);
@@ -371,7 +405,7 @@ function render() {
   if (!S.live) h += '<div class="warn">답을 불러오는 중입니다…</div>';
 
   if (S.notice.length) {
-    h += '<details class="notice" open><summary>먼저 읽어 주세요</summary><div class="body">' + S.notice.map(linkify).join('\n\n') + '</div></details>';
+    h += '<details class="notice" open><summary>먼저 읽어 주세요</summary><div class="body">' + md(S.notice.join('\n\n')) + '</div></details>';
   }
   var shown = items.filter(function (q) { return S.filter === 'all' || !hasAns(ans(q.id)) || S.open[q.id]; });
   if (!shown.length) h += '<div class="empty-all">모든 질문에 답이 달렸습니다. 고마워요!<br><br><button class="btn" data-act="filter" data-v="all">전체 답 보기</button></div>';
@@ -416,7 +450,7 @@ function card(q) {
   if (q.notes && q.notes.length) h += '<ul class="notes">' + q.notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>';
 
   if (!mine) {
-    if (a.answer) h += '<div class="ans">' + esc(a.answer) + '</div>';
+    if (a.answer) h += '<div class="ans">' + md(a.answer) + '</div>';
     if (a.files) h += attHtml(fileList(a.files), q.id, false);
     h += '<div class="row"><button class="btn ' + (has ? '' : 'main') + '" data-act="open" data-id="' + q.id + '">' + (has ? '수정하기' : '답 쓰기') + '</button>';
     // 적어 둔 기본값(설명 줄 '답이 없으면: …')을 한 번 눌러 답으로(2026-11-20 저자 '어 해', 무기고 Catalyst '고르게 하기'). 빈 질문에만
