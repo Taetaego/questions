@@ -45,6 +45,12 @@
   .st.s-new { background: var(--new-bg); color: var(--new); }
   .st.s-doing { background: var(--edit-bg); color: var(--edit); }
   .st.s-done { background: var(--done-bg); color: var(--done); }
+  .scr { font-size: 12px; padding: 1px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--sub); white-space: nowrap; flex: none; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .chips button { height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 99px; background: #fff; color: var(--sub); font-size: 13px; }
+  .chips button.on { background: var(--navy); border-color: var(--navy); color: #fff; }
+  .seen { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--sub); min-height: 36px; }
+  .seen .btn { min-width: 7.5em; height: 36px; }
   .txt { white-space: pre-wrap; margin: 0; }
   .txt a { color: var(--navy); }
   .reply { margin-top: 10px; background: #f7f9fc; border-left: 3px solid var(--navy); border-radius: 0 8px 8px 0; padding: 8px 12px; }
@@ -143,7 +149,7 @@
 <div class="sheet" id="sheet"></div>
 <script type="module">
 // 요청 페이지: 작업하다 생기는 요청(글 + 스크린샷·파일)을 받는다. 저장은 Firebase Realtime Database.
-//   pages/<PAGE>/requests/<id> = { text, by, at, status: new|doing|done, reply: { text, at }(처리 답글, 관리 기기에서만 씀), files: { <fid>: { name, type, size, w, h, t(작은 사진) } } }
+//   pages/<PAGE>/requests/<id> = { text, by, at, status: new|doing|done, screen(고른 화면 이름), seen: { by, at }(끝난 요청을 쓴 쪽이 '확인했어요' 누름), reply: { text, at }(처리 답글, 관리 기기에서만 씀), files: { <fid>: { name, type, size, w, h, t(작은 사진) } } }
 //   pages/<PAGE>/blobs/<fid>   = { d: 원본(data URL) }  ← 크게 볼 때만 불러온다
 //   pages/<PAGE>/settings      = { hours: "9,18", note, until } (until: 수정 기간이 끝나는 때, 밀리초. 2026-11-20 저자 '한 달 수정 타이머') ← 모아 받는 알림 시간(한국 시간, 정시)과 맨 위 한마디. 제목을 10번 누르면 나오는 설정 화면에서 바꾼다
 // 알림: 저장소의 .github/request_digest.py(GitHub Actions, 15분마다)가 정한 시간이 지나면 그사이 새 요청 수를 ntfy로 한 번 보낸다.
@@ -160,7 +166,7 @@ var MAX_FILES = 10;               // 요청 하나에 넣는 첨부 개수
 var STATUS = { new: '새 요청', doing: '하는 중', done: '끝' };
 
 var DEMO = /[?&]demo\b/.test(location.search);
-var S = { ed: {}, mine: [], note: '', sheetNote: '', rOpen: {}, rDraft: {}, rBusy: {}, name: '', reqs: {}, live: false, filter: 'open', text: '', files: [], busy: '', err: '', admin: false, hours: '', sheetHours: null, until: 0, sheetUntil: '' };
+var S = { ed: {}, mine: [], note: '', sheetNote: '', rOpen: {}, rDraft: {}, rBusy: {}, name: '', reqs: {}, live: false, filter: 'open', text: '', files: [], busy: '', err: '', admin: false, hours: '', sheetHours: null, until: 0, sheetUntil: '', screens: '', sheetScreens: '', screen: '' };
 var $app = document.getElementById('app'), $pick = document.getElementById('pick'), $viewer = document.getElementById('viewer'), $sheet = document.getElementById('sheet');
 var fb = null;
 
@@ -312,6 +318,8 @@ async function connect() {
     editReq: function (id, v) { return d.update(R('requests/' + id), v); },
     setHours: function (h) { return d.set(R('settings/hours'), h); },
     setNote: function (t) { return t ? d.set(R('settings/note'), t) : d.remove(R('settings/note')); },
+    setSeen: function (id, v) { return d.set(R('requests/' + id + '/seen'), v); },
+    setScreens: function (s) { return s ? d.set(R('settings/screens'), s) : d.remove(R('settings/screens')); },
     setUntil: function (ms) { return ms ? d.set(R('settings/until'), ms) : d.remove(R('settings/until')); }
   };
   d.onValue(R('requests'), function (s) { S.reqs = s.val() || {}; S.live = true; render(); },
@@ -319,6 +327,7 @@ async function connect() {
   d.onValue(R('settings/hours'), function (s) { S.hours = s.val() || ''; });
   d.onValue(R('settings/note'), function (s) { S.note = s.val() || ''; render(); });
   d.onValue(R('settings/until'), function (s) { S.until = s.val() || 0; render(); });
+  d.onValue(R('settings/screens'), function (s) { S.screens = s.val() || ''; render(); });
 }
 
 async function send() {
@@ -335,10 +344,11 @@ async function send() {
     S.busy = '보내는 중'; render();
     var v = { text: text, by: me(), at: Date.now(), status: 'new' };
     if (n) v.files = files;
+    if (S.screen) v.screen = S.screen;
     var id = newId();
     if (DEMO) demo.put(id, v); else await fb.putReq(id, v);
     S.mine.push(id); store('rq_mine', JSON.stringify(S.mine.slice(-200)));
-    S.text = ''; S.files = []; store('rq_draft', null); S.busy = ''; render();
+    S.text = ''; S.files = []; S.screen = ''; store('rq_draft', null); S.busy = ''; render();
     toast('요청을 보냈습니다');
   } catch (e) {
     S.busy = ''; S.err = '보내지 못했어요: ' + (e && e.message || '인터넷 연결을 확인해 주세요'); render();
@@ -387,6 +397,9 @@ function render() {
   // 새 요청 쓰기
   var busy = !!S.busy;
   h += '<h2>새 요청</h2><div class="card" id="rq-form">';
+  // 어느 화면 이야기인지 한 번 누르기(2026-11-20 저자 '어 해', 무기고 Catalyst '고르게 하기'). 안 골라도 됨. 목록은 설정 창에서
+  var scs = screenList();
+  if (scs.length) h += '<div class="chips" aria-label="어느 화면인지(안 골라도 돼요)">' + scs.map(function (x) { return '<button data-act="scr" data-v="' + esc(x) + '" class="' + (S.screen === x ? 'on' : '') + '">' + esc(x) + '</button>'; }).join('') + '</div>';
   h += '<textarea id="rq-text" placeholder="바꾸거나 더하면 좋을 것을 적어 주세요. 스크린샷을 같이 넣으면 빨리 알아볼 수 있어요.">' + esc(S.text) + '</textarea>';
   h += attHtml(S.files, 'draft', !busy);
   h += '<div class="row"><button class="btn" data-act="attach"' + (busy ? ' disabled' : '') + '>사진·파일 넣기</button>';
@@ -408,11 +421,13 @@ function render() {
   if (t) { t.focus({ preventScroll: true }); try { t.setSelectionRange(sel[0], sel[1]); } catch (e) {} }
 }
 
+function screenList(s) { return String(s == null ? S.screens : s).split(',').map(function (x) { return x.trim().slice(0, 30); }).filter(Boolean).slice(0, 12); }
+
 function card(r) {
   var st = r.status in STATUS ? r.status : 'new';
   var h = '<div class="card c-' + st + '" id="r-' + r.id + '">';
   var canEdit = S.admin || S.mine.indexOf(r.id) >= 0, ed = S.ed[r.id];
-  h += '<div class="head"><span class="st s-' + st + '">' + STATUS[st] + '</span><span>' + esc(r.by || '익명') + ' · ' + ago(r.at) + '</span>';
+  h += '<div class="head"><span class="st s-' + st + '">' + STATUS[st] + '</span>' + (r.screen ? '<span class="scr">' + esc(r.screen) + '</span>' : '') + '<span>' + esc(r.by || '익명') + ' · ' + ago(r.at) + '</span>';
   if (canEdit) h += '<button class="ebtn" data-act="eopen" data-id="' + r.id + '"' + (ed ? ' disabled' : '') + '>고치기</button>';
   h += '</div>';
   if (ed) {
@@ -433,6 +448,12 @@ function card(r) {
     h += '<div class="row"><button class="btn main" data-act="rsave" data-id="' + r.id + '"' + (bz ? ' disabled' : '') + '>답글 저장</button>';
     if (st !== 'done') h += '<button class="btn" data-act="rdone" data-id="' + r.id + '"' + (bz ? ' disabled' : '') + '>저장하고 끝으로</button>';
     h += '<button class="btn push" data-act="rclose" data-id="' + r.id + '">취소</button></div></div>';
+  }
+  // 끝난 요청: 쓴 쪽이 '확인했어요' 한 번(2026-11-20 저자 '어 해', 무기고 Hooked '보상 뒤 작은 투자'). 누가 언제 확인했는지 남음
+  if (st === 'done') {
+    if (r.seen) h += '<div class="seen">✓ ' + esc(r.seen.by || '익명') + '님이 확인 · ' + ago(r.seen.at) + '</div>';
+    else if (!S.admin) h += '<div class="seen"><button class="btn" data-act="seen" data-id="' + r.id + '">확인했어요</button><span>고친 것을 보셨으면 눌러 주세요</span></div>';
+    else h += '<div class="seen">아직 확인 전</div>';
   }
   if (S.admin) {
     h += '<div class="row adm"><span class="seg">';
@@ -466,7 +487,7 @@ setInterval(function () { var el = document.getElementById('period'); if (el && 
 var taps = 0, lastTap = 0;
 function openSheet() {
   S.admin = true; store('rq_admin', '1'); render();
-  S.sheetHours = hourList(S.hours); S.sheetNote = S.note;
+  S.sheetHours = hourList(S.hours); S.sheetNote = S.note; S.sheetScreens = S.screens;
   S.sheetUntil = S.until ? (function (e) { return e.y + String(e.m).padStart(2, '0') + String(e.d).padStart(2, '0'); })(dateOfUntil(S.until)) : '';
   drawSheet(); $sheet.classList.add('on');
 }
@@ -474,6 +495,9 @@ function drawSheet(msg) {
   var hs = S.sheetHours, h = '<div class="sheet-in"><button class="sheet-x" data-s="close" aria-label="닫기">✕</button><h3>맨 위 한마디</h3>';
   h += '<p>적으면 페이지 맨 위(새 요청 위)에 모두에게 보입니다. 비우고 저장하면 사라집니다.</p>';
   h += '<textarea id="sheet-note" maxlength="1000" placeholder="예: 이번 주는 회비 화면부터 고칩니다. 급한 건 카톡 주세요.">' + esc(S.sheetNote) + '</textarea>';
+  h += '<h3 style="margin-top:18px">화면 이름</h3>';
+  h += '<p>쉼표로 나눠 적으면 새 요청 칸 위에 누르는 단추로 나옵니다(6개 이하가 좋아요). 비우면 안 나옵니다.</p>';
+  h += '<input id="sheet-screens" maxlength="300" placeholder="홈,일정,회원명단,회비,가입신청,기타" value="' + esc(S.sheetScreens) + '" style="width:100%;height:44px;font-size:16px;border:1px solid var(--line);border-radius:8px;padding:0 12px">';
   h += '<h3 style="margin-top:18px">수정 기간</h3>';
   h += '<p>끝나는 날을 숫자 8자리로 쓰면(예: 20261220) 그날 밤 12시까지 남은 시간이 제목 옆에 작게 \'수정 기간 29일 12시간\'처럼 보입니다. 비우고 저장하면 사라집니다.</p>';
   h += '<input id="sheet-until" inputmode="numeric" maxlength="8" placeholder="20261220" value="' + esc(S.sheetUntil) + '" style="width:100%;height:44px;font-size:16px;border:1px solid var(--line);border-radius:8px;padding:0 12px">';
@@ -488,7 +512,7 @@ function drawSheet(msg) {
   h += '<p style="margin-top:14px">이 기기에서는 요청마다 상태 바꾸기·지우기 단추가 보입니다.</p><div class="row"><button class="btn" data-s="off">이 기기에서 관리 단추 숨기기</button></div>';
   $sheet.innerHTML = h + '</div>';
 }
-$sheet.addEventListener('input', function (e) { if (e.target.id === 'sheet-note') S.sheetNote = e.target.value; if (e.target.id === 'sheet-until') S.sheetUntil = e.target.value; });
+$sheet.addEventListener('input', function (e) { if (e.target.id === 'sheet-note') S.sheetNote = e.target.value; if (e.target.id === 'sheet-until') S.sheetUntil = e.target.value; if (e.target.id === 'sheet-screens') S.sheetScreens = e.target.value; });
 $sheet.addEventListener('click', function (e) {
   var b = e.target.closest('[data-s]'); if (!b) return;
   var s = b.dataset.s;
@@ -499,8 +523,9 @@ $sheet.addEventListener('click', function (e) {
   } else if (s === 'save') {
     var val = S.sheetHours.join(','), note = S.sheetNote.trim().slice(0, 1000), ut = S.sheetUntil.trim() ? untilFromDate(S.sheetUntil) : 0;
     if (S.sheetUntil.trim() && !ut) { drawSheet('수정 기간 날짜를 숫자 8자리로 써 주세요(예: 20261220)'); return; }
-    (DEMO ? Promise.resolve((demo.settings.hours = val, S.note = note, S.until = ut, render())) : Promise.all([fb.setHours(val), fb.setNote(note), fb.setUntil(ut)]))
-      .then(function () { S.hours = val; S.sheetNote = note; S.until = ut; render(); drawSheet('저장했습니다'); })
+    var scr = screenList(S.sheetScreens).join(',');
+    (DEMO ? Promise.resolve((demo.settings.hours = val, S.note = note, S.until = ut, S.screens = scr, render())) : Promise.all([fb.setHours(val), fb.setNote(note), fb.setUntil(ut), fb.setScreens(scr)]))
+      .then(function () { S.hours = val; S.sheetNote = note; S.until = ut; S.screens = scr; S.sheetScreens = scr; render(); drawSheet('저장했습니다'); })
       .catch(function (err) { drawSheet('저장하지 못했어요: ' + err.message); });
   } else if (s === 'test') {
     if (DEMO || !NTFY) { drawSheet('시험 화면에서는 보내지 않습니다'); return; }
@@ -558,6 +583,11 @@ $app.addEventListener('click', function (e) {
     send();
   } else if (act === 'view') {
     view(b.dataset.o, b.dataset.f);
+  } else if (act === 'scr') {
+    S.screen = S.screen === b.dataset.v ? '' : b.dataset.v; render();
+  } else if (act === 'seen') {
+    var sv = { by: me(), at: Date.now() };
+    if (DEMO) demo.seen(id, sv); else fb.setSeen(id, sv).catch(function (err) { toast('저장하지 못했어요: ' + err.message); });
   } else if (act === 'status') {
     var v = b.dataset.v;
     if (DEMO) demo.status(id, v); else fb.setStatus(id, v).catch(function (err) { toast('바꾸지 못했어요: ' + err.message); });
@@ -598,10 +628,11 @@ function demoConnect() {
     put: function (id, v) { db[id] = v; push(); },
     edit: function (id, v) { Object.keys(v).forEach(function (k) { if (v[k] == null) delete db[id][k]; else db[id][k] = v[k]; }); push(); },
     status: function (id, v) { db[id].status = v; push(); },
+    seen: function (id, v) { db[id].seen = v; push(); },
     reply: function (id, v, done) { if (v) db[id].reply = v; else delete db[id].reply; if (done) db[id].status = 'done'; push(); },
     del: function (id) { delete db[id]; push(); }
   };
-  S.hours = '9,18'; S.until = Date.now() + 29 * DAY + 12.5 * 3600000;
+  S.screens = '홈,일정,회원명단,회비,가입신청,기타'; S.hours = '9,18'; S.until = Date.now() + 29 * DAY + 12.5 * 3600000;
   S.note = '이번 주는 회비 화면부터 고칩니다. 급한 건 카톡 주세요.\n둘째 줄: 사진은 한 번에 10장까지 넣을 수 있어요.\n셋째 줄: 끝난 요청은 \'전체\'에서 다시 볼 수 있어요.';
   setTimeout(push, 100);
 }
