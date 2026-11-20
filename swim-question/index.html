@@ -398,6 +398,10 @@ function render() {
   }
 }
 
+function defaultOf(q) {
+  var n = (q.notes || []).filter(function (x) { return /^\s*[·•-]?\s*답이 없으면\s*[:：]/.test(x); })[0];
+  return n ? n.replace(/^\s*[·•-]?\s*답이 없으면\s*[:：]\s*/, '').trim() : '';
+}
 function card(q) {
   var a = ans(q.id), mine = S.open[q.id], ed = editingOf(q.id);
   var other = ed && ed.name !== meTag();
@@ -415,6 +419,9 @@ function card(q) {
     if (a.answer) h += '<div class="ans">' + esc(a.answer) + '</div>';
     if (a.files) h += attHtml(fileList(a.files), q.id, false);
     h += '<div class="row"><button class="btn ' + (has ? '' : 'main') + '" data-act="open" data-id="' + q.id + '">' + (has ? '수정하기' : '답 쓰기') + '</button>';
+    // 적어 둔 기본값(설명 줄 '답이 없으면: …')을 한 번 눌러 답으로(2026-11-20 저자 '어 해', 무기고 Catalyst '고르게 하기'). 빈 질문에만
+    var dv = has || other ? '' : defaultOf(q);
+    if (dv) h += '<button class="btn" data-act="dflt" data-id="' + q.id + '">적어 둔 대로 해 주세요</button>';
     if (S.admin) h += '<button class="btn push" data-act="qedit" data-id="' + q.id + '">질문 고치기</button>';
     h += '</div>';
   } else {
@@ -567,6 +574,11 @@ $app.addEventListener('click', function (e) {
     release(id); render();
   } else if (act === 'save' || act === 'force') {
     save(id, act === 'force');
+  } else if (act === 'dflt') {
+    var q0 = S.qs.filter(function (x) { return x.id === id; })[0], dv = q0 && defaultOf(q0);
+    if (!dv || hasAns(ans(id))) return;
+    S.open[id] = true; S.drafts[id] = '적어 둔 대로: ' + dv; S.bases[id] = ''; S.dfiles[id] = []; S.bfiles[id] = []; S.bwas[id] = false;
+    save(id, false);
   } else if (act === 'append') {
     var c = S.conflict[id];
     S.drafts[id] = (c.answer ? c.answer + '\n\n' : '') + '(' + me() + ') ' + (S.drafts[id] || '');
@@ -625,7 +637,8 @@ function demoConnect() {
 var DEMO_QS = { notice: ['https://example.com/', '시험용 안내 글입니다. questions.json의 notice가 여기에 나옵니다.'], questions: [
   { id: 'q1', cat: '가. 꼭 먼저', q: '시험 질문 1: 이미 답이 달린 질문', notes: ['왜 여쭙나요: 설명 줄은 이렇게 보입니다'] },
   { id: 'q2', cat: '가. 꼭 먼저', q: '시험 질문 2: 다른 분이 쓰는 중', notes: ['답이 없으면: 기본값을 이렇게 적어 둡니다'] },
-  { id: 'q3', cat: '나. 시간 될 때', q: '시험 질문 3: 아직 답 없음', notes: [] } ] };
+  { id: 'q3', cat: '나. 시간 될 때', q: '시험 질문 3: 아직 답 없음', notes: [] },
+  { id: 'q4', cat: '나. 시간 될 때', q: '시험 질문 4: 기본값이 적힌 질문', notes: ['왜 여쭙나요: 홈 첫 화면에 나옵니다', '답이 없으면: 6명으로 둡니다'] } ] };
 
 // ---------- 시작 ----------
 S.name = load('qp_name'); S.admin = load('qp_admin') === '1';
