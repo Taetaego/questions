@@ -1,0 +1,16 @@
+# 요청 페이지 모아 알림: 15분마다 깨어나 정한 시간(페이지 설정 화면에서 고름)이 지났으면 새 요청 수를 ntfy로 보낸다.
+# 하는 일은 ../request_digest.py 머리말. 손으로 돌리기: GitHub 저장소 Actions 탭 → 요청 모아 알림 → Run workflow.
+name: 요청 모아 알림
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -I .github/request_digest.py

@@ -10,6 +10,7 @@
     --bg: #f4f6f9; --card: #fff; --ink: #14213d; --sub: #5b6577; --line: #dde2ea;
     --navy: #1d3a6e; --done: #1f7a4d; --done-bg: #e7f4ec; --edit: #b45309; --edit-bg: #fdf1e2;
     --empty: #8a93a3; --red: #c62828; --yellow: #ffd23f;
+    --tile: 88px;
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -66,9 +67,11 @@
   .btn.main { background: var(--yellow); border-color: var(--yellow); font-weight: 600; }
   .btn.red { color: #fff; background: var(--red); border-color: var(--red); }
   .btn:disabled { opacity: .5; }
+  .btn.save { min-width: 6.5em; }
   .warn { background: var(--edit-bg); color: var(--edit); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-top: 8px; }
   .warn .ans { background: #fff; color: var(--ink); }
-  .msg { font-size: 13px; color: var(--sub); margin-top: 6px; }
+  .msg { font-size: 13px; color: var(--sub); margin-top: 6px; min-height: 20px; }
+  .msg.bad { color: var(--red); }
   .empty-all { text-align: center; color: var(--sub); padding: 40px 0; }
 
   .gate { max-width: 360px; margin: 18vh auto 0; padding: 0 16px; }
@@ -78,24 +81,59 @@
   .gate input { width: 100%; font-size: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
   .gate .btn { width: 100%; margin-top: 16px; padding: 12px; }
   .err { color: var(--red); font-size: 14px; margin-top: 8px; min-height: 20px; }
+  /* 첨부: 사진은 같은 크기 네모, 파일은 한 줄씩. 올리기 전·후 크기가 같다 */
+  .att { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .att:empty { display: none; }
+  .att-img { position: relative; width: var(--tile); height: var(--tile); flex: none; border: 1px solid var(--line); border-radius: 8px;
+    overflow: hidden; background: #eef0f4; padding: 0; }
+  .att-open { display: block; width: 100%; height: 100%; border: 0; padding: 0; background: none; }
+  .att-img img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+  .att-file { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 8px 40px 8px 10px;
+    border: 1px solid var(--line); border-radius: 8px; background: #f7f9fc; text-align: left; color: var(--ink); font-size: 14px; }
+  .att-file .ext { flex: none; width: 40px; height: 36px; border-radius: 6px; background: var(--navy); color: #fff; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; text-transform: uppercase; }
+  .att-name { flex: 1; min-width: 0; border: 0; background: none; padding: 0; text-align: left; color: inherit; font: inherit; }
+  .att-file .sz { display: block; font-size: 12px; color: var(--sub); }
+  .att-x { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; border: 0; border-radius: 14px; padding: 0;
+    background: rgba(20, 33, 61, .75); color: #fff; font-size: 15px; line-height: 28px; text-align: center; }
+  .att-file .att-x { top: 50%; margin-top: -14px; }
+
+  /* 크게 보기 */
+  .viewer { position: fixed; inset: 0; z-index: 20; background: #0b1220; display: none; flex-direction: column; }
+  .viewer.on { display: flex; }
+  .vbar { display: flex; gap: 8px; padding: 10px 12px; padding-top: max(10px, env(safe-area-inset-top)); align-items: center; flex: none; }
+  .vbar .btn { padding: 7px 12px; font-size: 14px; }
+  .vbar .nm { flex: 1; min-width: 0; color: #c9d1de; font-size: 13px; }
+  .vbody { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; text-align: center; }
+  .vbody img { display: block; margin: 0 auto; max-width: 100%; height: auto; background: #fff; }
+  .vbody.real img { max-width: none; }
+  .vbody p { color: #c9d1de; margin-top: 30vh; }
+
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: #fff;
-    padding: 10px 16px; border-radius: 8px; font-size: 14px; z-index: 9; max-width: calc(100% - 32px); }
+    padding: 10px 16px; border-radius: 8px; font-size: 14px; z-index: 30; max-width: calc(100% - 32px); }
 </style>
 </head>
 <body>
 <div id="app"></div>
+<input type="file" id="pick" multiple hidden>
+<div class="viewer" id="viewer"></div>
 <script type="module">
 // 질문 페이지: 질문은 같은 폴더의 questions.json(GitHub), 답은 Firebase Realtime Database.
+//   답: pages/<PAGE>/answers/<질문 id> = { answer, by, at, editing, files: { <fid>: { name, type, size, w, h, t(작은 사진) } } }
+//   첨부 원본: pages/<PAGE>/blobs/<fid> = { d: data URL }  ← 크게 볼 때만 불러온다
 // 아래 네 값은 '새 질문 페이지.sh'가 채운다.
 var TITLE = '팀준 운영진 질문';
 var PAGE = 'swim-question';          // Firebase 안에서 이 페이지 답이 들어가는 칸 이름 (pages/<PAGE>/answers)
 var DB_URL = 'https://question-pages-45aae-default-rtdb.asia-southeast1.firebasedatabase.app';          // Firebase Realtime Database 주소
 var NTFY = 'b9cebeb56f548330-swim-question';          // 마지막 빈 질문에 답을 저장하는 순간 알림을 보낼 ntfy 주제(ntfy.sh/<주제>). 비면 안 보냄
 var EDITING_MS = 5 * 60000;     // '작성 중' 표시가 저절로 풀리는 시간
+var MAX_SIDE = 3000;              // 사진 긴 변 최대(px). 스크린샷은 원본 크기 그대로 두어 글자가 읽힌다
+var MAX_FILE = 5 * 1024 * 1024;   // 사진이 아닌 파일 한 개 최대 크기
+var MAX_FILES = 10;               // 답 하나에 넣는 첨부 개수
 
 var DEMO = /[?&]demo\b/.test(location.search);
-var S = { name: '', qs: null, notice: [], answers: {}, filter: 'all', open: {}, drafts: {}, bases: {}, conflict: {}, busy: {}, live: false };
-var $app = document.getElementById('app');
+var S = { name: '', qs: null, notice: [], answers: {}, filter: 'all', open: {}, drafts: {}, dfiles: {}, bfiles: {}, bwas: {}, bases: {}, conflict: {}, busy: {}, err: {}, live: false };
+var $app = document.getElementById('app'), $pick = document.getElementById('pick'), $viewer = document.getElementById('viewer');
 var fb = null; // { db, ref, set, remove, onValue, runTransaction, onDisconnect }
 
 function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
@@ -122,10 +160,111 @@ function toast(t) {
   document.body.appendChild(el); setTimeout(function () { el.remove(); }, 2500);
 }
 function ans(id) { return S.answers[id] || {}; }
+function fileList(map) { return Object.keys(map || {}).map(function (k) { return { id: k, meta: map[k] }; }); }
+function hasAns(a) { return !!(a && (a.answer || (a.files && Object.keys(a.files).length))); }
 function editingOf(id) {
   var e = ans(id).editing;
   return e && e.name && Date.now() - (e.at || 0) < EDITING_MS ? e : null;
 }
+
+// ---------- 첨부(사진·파일) ----------
+function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+function kb(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB'; }
+function loadImg(src) { return new Promise(function (ok, no) { var i = new Image(); i.onload = function () { ok(i); }; i.onerror = no; i.src = src; }); }
+function readUrl(blob) { return new Promise(function (ok, no) { var r = new FileReader(); r.onload = function () { ok(r.result); }; r.onerror = no; r.readAsDataURL(blob); }); }
+function encode(img, w, h, q) {
+  var c = document.createElement('canvas'); c.width = w; c.height = h;
+  var x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(img, 0, 0, w, h);
+  return c.toDataURL('image/jpeg', q);
+}
+// 사진: 긴 변 MAX_SIDE까지 원본 크기, JPEG 0.92(너무 크면 0.82). 목록용 작은 사진(t)은 짧은 변 200px. 사진이 아닌 파일: 그대로(MAX_FILE까지).
+async function prep(file) {
+  if (/^image\//.test(file.type) && !/svg|gif/.test(file.type)) {
+    try {
+      var u = URL.createObjectURL(file), img = await loadImg(u); URL.revokeObjectURL(u);
+      var w = img.naturalWidth, h = img.naturalHeight;
+      var k = Math.min(1, MAX_SIDE / Math.max(w, h), Math.sqrt(16e6 / (w * h)));
+      var cw = Math.round(w * k), ch = Math.round(h * k);
+      var d = encode(img, cw, ch, 0.92);
+      if (d.length > 6.5e6) d = encode(img, cw, ch, 0.82);
+      // 작은 사진은 규칙 한도(4만 자) 안에 들 때까지 화질 → 크기 순으로 낮춘다
+      var t = '', side = 200;
+      for (var tries = 0; tries < 8 && (!t || t.length > 36000); tries++) {
+        var tk = Math.min(1, side / Math.min(w, h), side * 3 / Math.max(w, h));
+        t = encode(img, Math.max(1, Math.round(w * tk)), Math.max(1, Math.round(h * tk)), [0.7, 0.55, 0.4][tries % 3]);
+        if (tries % 3 === 2) side = Math.round(side * 0.75);
+      }
+      var nm = (file.name || '사진').replace(/\.[^.]+$/, '') + '.jpg';
+      return { id: newId(), d: d, meta: { name: nm.slice(0, 200), type: 'image/jpeg', size: Math.round(d.length * 3 / 4), w: cw, h: ch, t: t } };
+    } catch (e) { /* 그림으로 못 읽으면 파일로 둔다 */ }
+  }
+  if (file.size > MAX_FILE) throw new Error('"' + file.name + '"은 ' + kb(file.size) + '라 넣을 수 없어요(파일은 ' + kb(MAX_FILE) + '까지)');
+  return { id: newId(), d: await readUrl(file), meta: { name: (file.name || '파일').slice(0, 200), type: (file.type || 'application/octet-stream').slice(0, 100), size: file.size } };
+}
+async function addFiles(qid, list) {
+  list = Array.prototype.slice.call(list || []);
+  if (!list.length || !S.open[qid]) return;
+  var cur = S.dfiles[qid] || (S.dfiles[qid] = []);
+  if (cur.length + list.length > MAX_FILES) { S.err[qid] = '첨부는 답 하나에 ' + MAX_FILES + '개까지예요'; render(); return; }
+  delete S.err[qid]; S.busy[qid] = 'prep'; render();
+  for (var i = 0; i < list.length; i++) {
+    try { cur.push(await prep(list[i])); } catch (e) { S.err[qid] = e.message; }
+  }
+  S.busy[qid] = false; render();
+}
+function ext(m) { var x = /\.([a-z0-9]{1,5})$/i.exec(m.name || ''); return x ? x[1] : (m.type.split('/')[1] || '파일').slice(0, 5); }
+function isImg(m) { return /^image\//.test(m.type) && m.t; }
+// files: [{id, meta}] · owner: 질문 id · draft면 빼기(✕) 단추
+function attHtml(files, owner, draft) {
+  var imgs = '', docs = '';
+  files.forEach(function (f) {
+    var m = f.meta, x = draft ? '<button class="att-x" data-act="unattach" data-id="' + owner + '" data-f="' + f.id + '" aria-label="빼기">✕</button>' : '';
+    var key = ' data-f="' + f.id + '" data-id="' + owner + '" data-d="' + (draft ? 1 : 0) + '"';
+    if (isImg(m)) imgs += '<span class="att-img"><button class="att-open" data-act="view"' + key + ' aria-label="크게 보기"><img src="' + m.t + '" alt=""></button>' + x + '</span>';
+    else docs += '<span class="att-file"><span class="ext">' + esc(ext(m)) + '</span><button class="att-name" data-act="view"' + key + '>' + esc(m.name) + '<span class="sz">' + kb(m.size) + ' · 눌러서 열기</span></button>' + x + '</span>';
+  });
+  return '<div class="att">' + imgs + docs + '</div>';
+}
+var cache = {}; // fid → object URL
+async function blobUrl(fid) {
+  if (cache[fid]) return cache[fid];
+  var d = DEMO ? demo.blobs[fid] : await fb.getBlob(fid);
+  if (!d) throw new Error('파일을 찾지 못했어요');
+  var b = await (await fetch(d)).blob();
+  return (cache[fid] = URL.createObjectURL(b));
+}
+function findFile(qid, fid, draft) {
+  var list = draft ? (S.dfiles[qid] || []) : fileList(ans(qid).files);
+  return list.filter(function (x) { return x.id === fid; })[0];
+}
+async function view(qid, fid, draft) {
+  var f = findFile(qid, fid, draft); if (!f) return;
+  var m = f.meta;
+  if (!isImg(m)) {
+    // 사진이 아닌 파일: 새 탭에서 연다(PDF는 브라우저가 미리 보여 줌). 창은 누른 순간 열어 둬야 막히지 않는다
+    var w = window.open('', '_blank');
+    try {
+      var u = f.d ? URL.createObjectURL(await (await fetch(f.d)).blob()) : await blobUrl(fid);
+      if (w) w.location.href = u; else location.href = u;
+    } catch (e) { if (w) w.close(); toast(e.message); }
+    return;
+  }
+  $viewer.innerHTML = '<div class="vbar"><button class="btn" data-v="close">닫기</button><span class="nm">' + esc(m.name) + (m.w ? ' · ' + m.w + '×' + m.h : '') +
+    '</span><button class="btn" data-v="real">실제 크기</button><a class="btn" data-v="save" download="' + esc(m.name) + '">받기</a></div><div class="vbody"><p>불러오는 중…</p></div>';
+  $viewer.classList.add('on'); document.body.style.overflow = 'hidden';
+  try {
+    var src = f.d ? f.d : await blobUrl(fid);
+    if (!$viewer.classList.contains('on')) return;
+    $viewer.querySelector('.vbody').innerHTML = '<img src="' + src + '" alt="">';
+    $viewer.querySelector('[data-v="save"]').href = src;
+  } catch (e) { $viewer.querySelector('.vbody').innerHTML = '<p>' + esc(e.message) + '</p>'; }
+}
+$viewer.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-v]'); if (!b) return;
+  if (b.dataset.v === 'close') { $viewer.classList.remove('on'); $viewer.innerHTML = ''; document.body.style.overflow = ''; }
+  else if (b.dataset.v === 'real') { var v = $viewer.querySelector('.vbody'); v.classList.toggle('real'); b.textContent = v.classList.contains('real') ? '화면에 맞춤' : '실제 크기'; }
+});
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && $viewer.classList.contains('on')) $viewer.querySelector('[data-v="close"]').click(); });
 
 // ---------- 저장소(Firebase) ----------
 async function connect() {
@@ -135,7 +274,10 @@ async function connect() {
   var d = await import(base + 'firebase-database.js');
   var db = d.getDatabase(app.initializeApp({ databaseURL: DB_URL }));
   fb = { db: db, ref: function (p) { return d.ref(db, 'pages/' + PAGE + '/answers' + (p ? '/' + p : '')); },
-         set: d.set, remove: d.remove, runTransaction: d.runTransaction, onDisconnect: d.onDisconnect };
+         set: d.set, remove: d.remove, runTransaction: d.runTransaction, onDisconnect: d.onDisconnect,
+         putBlob: function (fid, data) { return d.set(d.ref(db, 'pages/' + PAGE + '/blobs/' + fid), { d: data }); },
+         getBlob: function (fid) { return d.get(d.ref(db, 'pages/' + PAGE + '/blobs/' + fid + '/d')).then(function (s) { return s.val(); }); },
+         delBlob: function (fid) { return d.remove(d.ref(db, 'pages/' + PAGE + '/blobs/' + fid)).catch(function () {}); } };
   d.onValue(fb.ref(), function (snap) { S.answers = snap.val() || {}; S.live = true; render(); },
     function (err) { toast('답을 불러오지 못했습니다: ' + err.message); });
 }
@@ -155,16 +297,28 @@ function release(id) {
 }
 
 // base: 쓰기 시작할 때 본 답. 그사이 다른 사람이 바꿨으면 force 없이는 저장하지 않는다.
-function saveAnswer(id, text, base, force) {
-  if (DEMO) return demo.save(id, text, base, force);
+// 새로 넣은 첨부는 원본(blobs)을 먼저 올리고, 답에는 이름·크기·작은 사진만 적는다. 뺀 첨부의 원본은 저장된 뒤 지운다.
+async function saveAnswer(id, text, base, force) {
+  var draft = S.dfiles[id] || [], files = null;
+  for (var i = 0; i < draft.length; i++) {
+    var f = draft[i];
+    if (f.d && !f.up) { if (DEMO) demo.blobs[f.id] = f.d; else await fb.putBlob(f.id, f.d); f.up = true; }
+    (files = files || {})[f.id] = f.meta;
+  }
+  var gone = (S.bfiles[id] || []).filter(function (k) { return !files || !files[k]; });
+  if (DEMO) return demo.save(id, text, base, force, files);
   var seen = null;
   return fb.runTransaction(fb.ref(id), function (cur) {
     var curText = cur && cur.answer ? cur.answer : '';
     if (!force && curText !== (base || '')) { seen = cur; return; } // 그만둠
-    return text ? { answer: text, by: me(), at: Date.now() } : null;
+    if (!text && !files) return null;
+    var v = { by: me(), at: Date.now() };
+    if (text) v.answer = text;
+    if (files) v.files = files;
+    return v;
   }).then(function (res) {
-    if (res.committed) { fb.onDisconnect(fb.ref(id + '/editing')).cancel(); return { ok: true }; }
-    return { ok: false, conflict: true, answer: seen && seen.answer || '', by: seen && seen.by || '' };
+    if (res.committed) { fb.onDisconnect(fb.ref(id + '/editing')).cancel(); gone.forEach(fb.delBlob); return { ok: true }; }
+    return { ok: false, conflict: true, answer: seen && seen.answer || '', by: seen && seen.by || '', files: seen && seen.files || null };
   });
 }
 
@@ -175,7 +329,7 @@ function render() {
   var y = window.scrollY;
 
   var items = S.qs, total = items.length;
-  var done = items.filter(function (q) { return ans(q.id).answer; }).length;
+  var done = items.filter(function (q) { return hasAns(ans(q.id)); }).length;
   var pct = total ? Math.round(done / total * 100) : 0;
   var h = '<header class="top"><div class="in">';
   h += '<h1>' + esc(TITLE) + ' <span class="who">' + (S.name ? esc(S.name) + '<button data-act="rename">이름 바꾸기</button>' : '<button data-act="rename">이름 넣기</button>') + '</span></h1>';
@@ -189,7 +343,7 @@ function render() {
   if (S.notice.length) {
     h += '<details class="notice" open><summary>먼저 읽어 주세요</summary><div class="body">' + S.notice.map(linkify).join('\n\n') + '</div></details>';
   }
-  var shown = items.filter(function (q) { return S.filter === 'all' || !ans(q.id).answer || S.open[q.id]; });
+  var shown = items.filter(function (q) { return S.filter === 'all' || !hasAns(ans(q.id)) || S.open[q.id]; });
   if (!shown.length) h += '<div class="empty-all">모든 질문에 답이 달렸습니다. 고마워요!<br><br><button class="btn" data-act="filter" data-v="all">전체 답 보기</button></div>';
   var lastCat = null;
   shown.forEach(function (q) {
@@ -209,17 +363,19 @@ function render() {
 function card(q) {
   var a = ans(q.id), mine = S.open[q.id], ed = editingOf(q.id);
   var other = ed && ed.name !== meTag();
-  var h = '<div class="card ' + (a.answer ? 'done' : (other ? 'editing' : '')) + '" id="' + q.id + '">';
-  if (a.answer) h += '<span class="st done">✅ ' + esc(a.by || '익명') + (a.at ? ' · ' + ago(a.at) : '') + '</span>';
+  var has = hasAns(a);
+  var h = '<div class="card ' + (has ? 'done' : (other ? 'editing' : '')) + '" id="' + q.id + '">';
+  if (has) h += '<span class="st done">✅ ' + esc(a.by || '익명') + (a.at ? ' · ' + ago(a.at) : '') + '</span>';
   else if (other) h += '<span class="st editing">✏️ ' + esc(shown(ed.name)) + ' 작성 중</span>';
   else h += '<span class="st empty">아직 답 없음</span>';
-  if (a.answer && other) h += ' <span class="st editing">✏️ ' + esc(shown(ed.name)) + ' 고치는 중</span>';
+  if (has && other) h += ' <span class="st editing">✏️ ' + esc(shown(ed.name)) + ' 고치는 중</span>';
   h += '<p class="q">' + esc(q.q) + '</p>';
   if (q.notes && q.notes.length) h += '<ul class="notes">' + q.notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>';
 
   if (!mine) {
     if (a.answer) h += '<div class="ans">' + esc(a.answer) + '</div>';
-    h += '<div class="row"><button class="btn ' + (a.answer ? '' : 'main') + '" data-act="open" data-id="' + q.id + '">' + (a.answer ? '수정하기' : '답 쓰기') + '</button></div>';
+    if (a.files) h += attHtml(fileList(a.files), q.id, false);
+    h += '<div class="row"><button class="btn ' + (has ? '' : 'main') + '" data-act="open" data-id="' + q.id + '">' + (has ? '수정하기' : '답 쓰기') + '</button></div>';
   } else {
     if (other) h += '<div class="warn">' + esc(shown(ed.name)) + '님도 지금 이 질문을 쓰고 있어요. 겹치지 않게 말을 맞춰 주세요.</div>';
     var c = S.conflict[q.id];
@@ -229,21 +385,26 @@ function card(q) {
       h += '<button class="btn red" data-act="force" data-id="' + q.id + '">내 답으로 덮어쓰기</button>';
       h += '<button class="btn" data-act="close" data-id="' + q.id + '">내 답 버리기</button></div>';
     }
+    var bz = S.busy[q.id];
     h += '<textarea data-id="' + q.id + '" placeholder="여기에 답을 써 주세요">' + esc(S.drafts[q.id] || '') + '</textarea>';
+    h += attHtml(S.dfiles[q.id] || [], q.id, !bz);
     if (!c) {
-      h += '<div class="row"><button class="btn main" data-act="save" data-id="' + q.id + '"' + (S.busy[q.id] ? ' disabled' : '') + '>' + (S.busy[q.id] ? '저장 중…' : '저장') + '</button>';
-      h += '<button class="btn" data-act="close" data-id="' + q.id + '">취소</button></div>';
-      if (a.answer) h += '<div class="msg">글을 모두 지우고 저장하면 답이 비워집니다.</div>';
+      h += '<div class="row"><button class="btn main save" data-act="save" data-id="' + q.id + '"' + (bz ? ' disabled' : '') + '>' + (bz === true ? '저장 중…' : '저장') + '</button>';
+      h += '<button class="btn" data-act="close" data-id="' + q.id + '">취소</button>';
+      h += '<button class="btn" data-act="attach" data-id="' + q.id + '" style="margin-left:auto"' + (bz ? ' disabled' : '') + '>사진·파일 넣기</button></div>';
+      var em = S.err[q.id];
+      h += '<div class="msg' + (em ? ' bad' : '') + '">' + esc(bz === 'prep' ? '사진 준비 중…' : em || (has ? '글과 첨부를 모두 지우고 저장하면 답이 비워집니다.' : '컴퓨터에서는 스크린샷을 답 칸에 붙여 넣어도(⌘V) 돼요.')) + '</div>';
     }
   }
   return h + '</div>';
 }
 
 function exportCsv() {
-  var rows = [['분류', '질문', '답', '작성자', '작성 시간']];
+  var rows = [['분류', '질문', '답', '첨부', '작성자', '작성 시간']];
   S.qs.forEach(function (q) {
     var a = ans(q.id);
-    rows.push([q.cat, q.q, a.answer || '', a.answer ? (a.by || '') : '', a.at ? new Date(a.at).toLocaleString('ko-KR') : '']);
+    var att = fileList(a.files).map(function (f) { return f.meta.name; }).join(', ');
+    rows.push([q.cat, q.q, a.answer || '', att, hasAns(a) ? (a.by || '') : '', a.at ? new Date(a.at).toLocaleString('ko-KR') : '']);
   });
   var csv = '﻿' + rows.map(function (r) { return r.map(function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
   var a = document.createElement('a');
@@ -256,6 +417,12 @@ function exportCsv() {
 $app.addEventListener('input', function (e) {
   if (e.target.tagName === 'TEXTAREA') S.drafts[e.target.dataset.id] = e.target.value;
 });
+$app.addEventListener('paste', function (e) {
+  var fs = e.clipboardData && e.clipboardData.files;
+  if (fs && fs.length && e.target.tagName === 'TEXTAREA') { e.preventDefault(); addFiles(e.target.dataset.id, fs); }
+});
+var pickFor = null;
+$pick.addEventListener('change', function () { addFiles(pickFor, $pick.files).then(function () { $pick.value = ''; }); });
 
 $app.addEventListener('click', function (e) {
   var b = e.target.closest('[data-act]'); if (!b) return;
@@ -267,19 +434,28 @@ $app.addEventListener('click', function (e) {
     S.filter = b.dataset.v; render(); window.scrollTo(0, 0);
   } else if (act === 'export') {
     exportCsv();
+  } else if (act === 'attach') {
+    pickFor = id; $pick.click();
+  } else if (act === 'unattach') {
+    S.dfiles[id] = (S.dfiles[id] || []).filter(function (f) { return f.id !== b.dataset.f; }); delete S.err[id]; render();
+  } else if (act === 'view') {
+    view(id, b.dataset.f, b.dataset.d === '1');
   } else if (act === 'open') {
     var cur = ans(id).answer || '';
     S.open[id] = true; S.drafts[id] = cur; S.bases[id] = cur; delete S.conflict[id];
+    S.dfiles[id] = fileList(ans(id).files); S.bfiles[id] = Object.keys(ans(id).files || {}); S.bwas[id] = hasAns(ans(id)); delete S.err[id];
     claim(id); render();
     var t = $app.querySelector('textarea[data-id="' + id + '"]'); if (t) t.focus();
   } else if (act === 'close') {
-    delete S.open[id]; delete S.drafts[id]; delete S.conflict[id];
+    delete S.open[id]; delete S.drafts[id]; delete S.conflict[id]; delete S.dfiles[id]; delete S.err[id];
     release(id); render();
   } else if (act === 'save' || act === 'force') {
     save(id, act === 'force');
   } else if (act === 'append') {
     var c = S.conflict[id];
     S.drafts[id] = (c.answer ? c.answer + '\n\n' : '') + '(' + me() + ') ' + (S.drafts[id] || '');
+    S.dfiles[id] = fileList(c.files).concat((S.dfiles[id] || []).filter(function (f) { return !(c.files && c.files[f.id]); }));
+    S.bfiles[id] = Object.keys(c.files || {});
     S.bases[id] = c.answer; delete S.conflict[id];
     save(id, false);
   }
@@ -287,20 +463,20 @@ $app.addEventListener('click', function (e) {
 
 // 이 저장으로 빈 질문이 0개가 되면(전에 비어 있던 질문에 답을 넣었고, 나머지는 이미 다 참) 만든 사람 휴대폰에 ntfy 알림 한 번.
 // 답 내용은 보내지 않는다. 알림이 안 가도 저장에는 영향 없음.
-function notifyIfFull(id, text, base) {
-  if (DEMO || !NTFY || !S.qs || !text || (base || '')) return;
-  var left = S.qs.filter(function (q) { return q.id !== id && !ans(q.id).answer; }).length;
+function notifyIfFull(id, before, after) {
+  if (DEMO || !NTFY || !S.qs || !after || before) return;
+  var left = S.qs.filter(function (q) { return q.id !== id && !hasAns(ans(q.id)); }).length;
   if (left) return;
   fetch('https://ntfy.sh/' + NTFY, { method: 'POST', body: TITLE + ': 질문 ' + S.qs.length + '개 답이 다 찼습니다', headers: { Tags: 'white_check_mark', Click: location.href.split('?')[0] } }).catch(function () {});
 }
 
 function save(id, force) {
   S.busy[id] = true; render();
-  var text = (S.drafts[id] || '').trim(), base = S.bases[id];
+  var text = (S.drafts[id] || '').trim(), base = S.bases[id], after = !!(text || (S.dfiles[id] || []).length);
   saveAnswer(id, text, base, force).then(function (d) {
     S.busy[id] = false;
-    if (d.ok) { notifyIfFull(id, text, base); delete S.open[id]; delete S.drafts[id]; delete S.conflict[id]; toast('저장했습니다'); render(); return; }
-    S.conflict[id] = { answer: d.answer, by: d.by }; render();
+    if (d.ok) { notifyIfFull(id, S.bwas[id], after); delete S.open[id]; delete S.drafts[id]; delete S.conflict[id]; delete S.dfiles[id]; toast('저장했습니다'); render(); return; }
+    S.conflict[id] = { answer: d.answer, by: d.by, files: d.files }; render();
   }).catch(function (err) { S.busy[id] = false; toast('저장 실패: ' + (err && err.message || '인터넷 연결을 확인해 주세요')); render(); });
 }
 
@@ -316,14 +492,14 @@ function demoConnect() {
   };
   function push() { S.answers = JSON.parse(JSON.stringify(db)); S.live = true; render(); }
   demo = {
-    db: db,
+    db: db, blobs: {},
     claim: function (id, v) { db[id] = db[id] || {}; db[id].editing = v; push(); },
     release: function (id, n) { if (db[id] && db[id].editing && db[id].editing.name === n) delete db[id].editing; push(); },
-    save: function (id, text, base, force) {
+    save: function (id, text, base, force, files) {
       return new Promise(function (res) { setTimeout(function () {
         var cur = db[id] || {};
-        if (!force && (cur.answer || '') !== (base || '')) return res({ ok: false, conflict: true, answer: cur.answer || '', by: cur.by || '' });
-        if (text) db[id] = { answer: text, by: me(), at: Date.now() }; else delete db[id];
+        if (!force && (cur.answer || '') !== (base || '')) return res({ ok: false, conflict: true, answer: cur.answer || '', by: cur.by || '', files: cur.files || null });
+        if (text || files) { db[id] = { by: me(), at: Date.now() }; if (text) db[id].answer = text; if (files) db[id].files = files; } else delete db[id];
         push(); res({ ok: true });
       }, 150); });
     }
@@ -341,7 +517,7 @@ render();
 (DEMO ? Promise.resolve(DEMO_QS) : fetch('questions.json', { cache: 'no-cache' }).then(function (r) { return r.json(); }))
   .then(function (d) { S.qs = d.questions; S.notice = d.notice || []; render(); return connect(); })
   .catch(function (err) { $app.innerHTML = '<div class="gate"><p>불러오지 못했습니다: ' + esc(err && err.message) + '</p></div>'; });
-window.__qp = { S: S, demo: function () { return demo; } }; // 점검용
+window.__qp = { S: S, demo: function () { return demo; }, addFiles: addFiles }; // 점검용
 </script>
 </body>
 </html>
