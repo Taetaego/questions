@@ -124,6 +124,11 @@
   .note .nh { font-size: 13px; color: var(--sub); font-weight: 600; margin-bottom: 2px; }
   .note p { margin: 0; white-space: pre-wrap; }
   .note a { color: var(--navy); }
+  .period { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--navy); border-radius: 12px; padding: 12px 16px; margin-top: 16px; }
+  .period .nh { font-size: 13px; color: var(--sub); font-weight: 600; }
+  .period b { font-size: 18px; }
+  .period .to { font-size: 13px; color: var(--sub); }
+  .period.over { border-left-color: var(--line); color: var(--sub); }
   .sheet-in textarea { min-height: 90px; }
   .topic { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: #f7f9fc; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; word-break: break-all; color: var(--ink); }
 </style>
@@ -137,7 +142,7 @@
 // 요청 페이지: 작업하다 생기는 요청(글 + 스크린샷·파일)을 받는다. 저장은 Firebase Realtime Database.
 //   pages/<PAGE>/requests/<id> = { text, by, at, status: new|doing|done, reply: { text, at }(처리 답글, 관리 기기에서만 씀), files: { <fid>: { name, type, size, w, h, t(작은 사진) } } }
 //   pages/<PAGE>/blobs/<fid>   = { d: 원본(data URL) }  ← 크게 볼 때만 불러온다
-//   pages/<PAGE>/settings      = { hours: "9,18", note } ← 모아 받는 알림 시간(한국 시간, 정시)과 맨 위 한마디. 제목을 10번 누르면 나오는 설정 화면에서 바꾼다
+//   pages/<PAGE>/settings      = { hours: "9,18", note, until } (until: 수정 기간이 끝나는 때, 밀리초. 2026-11-20 저자 '한 달 수정 타이머') ← 모아 받는 알림 시간(한국 시간, 정시)과 맨 위 한마디. 제목을 10번 누르면 나오는 설정 화면에서 바꾼다
 // 알림: 저장소의 .github/request_digest.py(GitHub Actions, 15분마다)가 정한 시간이 지나면 그사이 새 요청 수를 ntfy로 한 번 보낸다.
 // 아래 값은 '새 질문 페이지.sh 요청'이 채운다.
 var KIND = 'request';
@@ -152,7 +157,7 @@ var MAX_FILES = 10;               // 요청 하나에 넣는 첨부 개수
 var STATUS = { new: '새 요청', doing: '하는 중', done: '끝' };
 
 var DEMO = /[?&]demo\b/.test(location.search);
-var S = { ed: {}, mine: [], note: '', sheetNote: '', rOpen: {}, rDraft: {}, rBusy: {}, name: '', reqs: {}, live: false, filter: 'open', text: '', files: [], busy: '', err: '', admin: false, hours: '', sheetHours: null };
+var S = { ed: {}, mine: [], note: '', sheetNote: '', rOpen: {}, rDraft: {}, rBusy: {}, name: '', reqs: {}, live: false, filter: 'open', text: '', files: [], busy: '', err: '', admin: false, hours: '', sheetHours: null, until: 0, sheetUntil: '' };
 var $app = document.getElementById('app'), $pick = document.getElementById('pick'), $viewer = document.getElementById('viewer'), $sheet = document.getElementById('sheet');
 var fb = null;
 
@@ -303,12 +308,14 @@ async function connect() {
     delReq: function (id) { return d.remove(R('requests/' + id)); },
     editReq: function (id, v) { return d.update(R('requests/' + id), v); },
     setHours: function (h) { return d.set(R('settings/hours'), h); },
-    setNote: function (t) { return t ? d.set(R('settings/note'), t) : d.remove(R('settings/note')); }
+    setNote: function (t) { return t ? d.set(R('settings/note'), t) : d.remove(R('settings/note')); },
+    setUntil: function (ms) { return ms ? d.set(R('settings/until'), ms) : d.remove(R('settings/until')); }
   };
   d.onValue(R('requests'), function (s) { S.reqs = s.val() || {}; S.live = true; render(); },
     function (err) { toast('요청을 불러오지 못했습니다: ' + err.message); });
   d.onValue(R('settings/hours'), function (s) { S.hours = s.val() || ''; });
   d.onValue(R('settings/note'), function (s) { S.note = s.val() || ''; render(); });
+  d.onValue(R('settings/until'), function (s) { S.until = s.val() || 0; render(); });
 }
 
 async function send() {
@@ -372,6 +379,7 @@ function render() {
   h += '</div></header><div class="wrap">';
 
   if (S.note) h += '<div class="note"><div class="nh">알려 드려요</div><p>' + linkify(S.note) + '</p></div>';
+  if (S.until) h += '<div class="period" id="period">' + periodHtml() + '</div>';
 
   // 새 요청 쓰기
   var busy = !!S.busy;
@@ -433,17 +441,39 @@ function card(r) {
   return h + '</div>';
 }
 
+// ---------- 수정 기간 타이머(2026-11-20 저자 '내가 며칠까지 설정하면 29일 12시간처럼 시간 단위로 줄어들게') ----------
+// 날짜(YYYYMMDD)를 고르면 그날 밤 12시(한국 시간)에 끝난다. 화면은 일·시간까지만 보여 1분마다 다시 셈해도 1시간에 한 번만 바뀐다
+var DAY = 86400000, KST = 9 * 3600000;
+function untilFromDate(s) {
+  var m = String(s || '').replace(/\D/g, '').match(/^(\d{4})(\d{2})(\d{2})$/); if (!m) return 0;
+  var t = Date.UTC(+m[1], +m[2] - 1, +m[3] + 1) - KST;                    // 그날 다음 날 0시(한국) = 그날 밤 12시
+  var back = new Date(t - DAY + KST); return back.getUTCMonth() + 1 === +m[2] && back.getUTCDate() === +m[3] ? t : 0;   // 없는 날짜(2월 30일 등)는 0
+}
+function dateOfUntil(ms) { var d = new Date(ms - 1 + KST); /* 끝나는 때(밤 12시) 바로 앞 = 그날 */ return { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate(), w: '일월화수목금토'[d.getUTCDay()] }; }
+function periodHtml() {
+  var e = dateOfUntil(S.until), left = S.until - Date.now(), to = e.m + '월 ' + e.d + '일(' + e.w + ')까지';
+  if (left <= 0) return '<span class="nh">수정 기간</span><b>끝났습니다</b><span class="to">' + to + '였어요</span>';
+  var dd = Math.floor(left / DAY), hh = Math.floor(left % DAY / 3600000);
+  var txt = dd ? dd + '일 ' + hh + '시간' : hh ? hh + '시간' : '1시간 안에 끝나요';
+  return '<span class="nh">수정 기간</span><b>' + txt + (dd || hh ? ' 남음' : '') + '</b><span class="to">' + to + '</span>';
+}
+setInterval(function () { var el = document.getElementById('period'); if (!el || !S.until) return; el.innerHTML = periodHtml(); el.classList.toggle('over', S.until <= Date.now()); }, 60000);
+
 // ---------- 설정(제목을 10번 누르면) ----------
 var taps = 0, lastTap = 0;
 function openSheet() {
   S.admin = true; store('rq_admin', '1'); render();
   S.sheetHours = hourList(S.hours); S.sheetNote = S.note;
+  S.sheetUntil = S.until ? (function (e) { return e.y + String(e.m).padStart(2, '0') + String(e.d).padStart(2, '0'); })(dateOfUntil(S.until)) : '';
   drawSheet(); $sheet.classList.add('on');
 }
 function drawSheet(msg) {
   var hs = S.sheetHours, h = '<div class="sheet-in"><button class="sheet-x" data-s="close" aria-label="닫기">✕</button><h3>맨 위 한마디</h3>';
   h += '<p>적으면 페이지 맨 위(새 요청 위)에 모두에게 보입니다. 비우고 저장하면 사라집니다.</p>';
   h += '<textarea id="sheet-note" maxlength="1000" placeholder="예: 이번 주는 회비 화면부터 고칩니다. 급한 건 카톡 주세요.">' + esc(S.sheetNote) + '</textarea>';
+  h += '<h3 style="margin-top:18px">수정 기간</h3>';
+  h += '<p>끝나는 날을 숫자 8자리로 쓰면(예: 20261220) 그날 밤 12시까지 남은 시간이 페이지 맨 위에 \'29일 12시간 남음\'처럼 보입니다. 비우고 저장하면 사라집니다.</p>';
+  h += '<input id="sheet-until" inputmode="numeric" maxlength="8" placeholder="20261220" value="' + esc(S.sheetUntil) + '" style="width:100%;height:44px;font-size:16px;border:1px solid var(--line);border-radius:8px;padding:0 12px">';
   h += '<h3 style="margin-top:18px">알림 시간</h3>';
   h += '<p>고른 시간(한국 시간, 정시)마다 그사이 들어온 새 요청 수를 휴대폰으로 한 번에 보냅니다. 새 요청이 없으면 보내지 않습니다. GitHub이 15분마다 확인하므로 정한 시간보다 15분쯤(붐비면 더) 늦게 올 수 있습니다.</p>';
   h += '<div class="hours">';
@@ -455,7 +485,7 @@ function drawSheet(msg) {
   h += '<p style="margin-top:14px">이 기기에서는 요청마다 상태 바꾸기·지우기 단추가 보입니다.</p><div class="row"><button class="btn" data-s="off">이 기기에서 관리 단추 숨기기</button></div>';
   $sheet.innerHTML = h + '</div>';
 }
-$sheet.addEventListener('input', function (e) { if (e.target.id === 'sheet-note') S.sheetNote = e.target.value; });
+$sheet.addEventListener('input', function (e) { if (e.target.id === 'sheet-note') S.sheetNote = e.target.value; if (e.target.id === 'sheet-until') S.sheetUntil = e.target.value; });
 $sheet.addEventListener('click', function (e) {
   var b = e.target.closest('[data-s]'); if (!b) return;
   var s = b.dataset.s;
@@ -464,9 +494,10 @@ $sheet.addEventListener('click', function (e) {
     if (i >= 0) S.sheetHours.splice(i, 1); else S.sheetHours.push(v);
     S.sheetHours.sort(function (a, b) { return a - b; }); drawSheet();
   } else if (s === 'save') {
-    var val = S.sheetHours.join(','), note = S.sheetNote.trim().slice(0, 1000);
-    (DEMO ? Promise.resolve((demo.settings.hours = val, S.note = note, render())) : Promise.all([fb.setHours(val), fb.setNote(note)]))
-      .then(function () { S.hours = val; S.sheetNote = note; drawSheet('저장했습니다'); })
+    var val = S.sheetHours.join(','), note = S.sheetNote.trim().slice(0, 1000), ut = S.sheetUntil.trim() ? untilFromDate(S.sheetUntil) : 0;
+    if (S.sheetUntil.trim() && !ut) { drawSheet('수정 기간 날짜를 숫자 8자리로 써 주세요(예: 20261220)'); return; }
+    (DEMO ? Promise.resolve((demo.settings.hours = val, S.note = note, S.until = ut, render())) : Promise.all([fb.setHours(val), fb.setNote(note), fb.setUntil(ut)]))
+      .then(function () { S.hours = val; S.sheetNote = note; S.until = ut; render(); drawSheet('저장했습니다'); })
       .catch(function (err) { drawSheet('저장하지 못했어요: ' + err.message); });
   } else if (s === 'test') {
     if (DEMO || !NTFY) { drawSheet('시험 화면에서는 보내지 않습니다'); return; }
@@ -567,7 +598,7 @@ function demoConnect() {
     reply: function (id, v, done) { if (v) db[id].reply = v; else delete db[id].reply; if (done) db[id].status = 'done'; push(); },
     del: function (id) { delete db[id]; push(); }
   };
-  S.hours = '9,18';
+  S.hours = '9,18'; S.until = Date.now() + 29 * DAY + 12.5 * 3600000;
   setTimeout(push, 100);
 }
 
