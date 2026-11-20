@@ -1,1 +1,140 @@
-<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex"><title>.</title>
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>질문·요청 페이지 모음</title>
+<style>
+/* 개발자(저자)가 보는 모음 페이지(2026-11-20 저자 "페이지 만들어지면 한눈에 볼 페이지, 프로젝트별로").
+   새 페이지 폴더가 저장소에 생기면 GitHub 목록에서 저절로 읽어 온다. 프로젝트 이름은 projects.json(폴더 이름 앞부분 → 이름). */
+:root { --bg: #f4f6f9; --card: #fff; --ink: #14202e; --muted: #5f6f80; --line: #dfe5ec; --main: #1f6fd1; --ok: #1d8a4e; --warn: #c2620a; --new: #d13b2f; --soft: #eef3fa; --r: 12px }
+* { box-sizing: border-box }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, "Apple SD Gothic Neo", "Pretendard", system-ui, sans-serif; word-break: keep-all }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px 48px }
+header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px }
+h1 { font-size: 22px; margin: 0; flex: 1 1 auto }
+.upd { color: var(--muted); font-size: 13px; min-width: 9em; text-align: right }
+button { font: inherit; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 12px; cursor: pointer; min-width: 6.5em }
+h2 { font-size: 17px; margin: 28px 0 10px; display: flex; gap: 8px; align-items: baseline }
+h2 small { color: var(--muted); font-weight: 400; font-size: 13px }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; min-height: 168px; display: flex; flex-direction: column; gap: 8px }
+.top { display: flex; align-items: center; gap: 8px }
+.kind { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--soft); color: var(--main); white-space: nowrap }
+.kind.request { background: #fdf1e6; color: var(--warn) }
+.top b { flex: 1 1 auto; font-size: 16px }
+.top a { color: var(--main); text-decoration: none; font-size: 13px; white-space: nowrap }
+.bar { height: 8px; background: var(--soft); border-radius: 99px; overflow: hidden }
+.bar i { display: block; height: 100%; background: var(--main); border-radius: 99px }
+.bar.full i { background: var(--ok) }
+.nums { display: flex; gap: 14px; font-size: 13px; color: var(--muted); flex-wrap: wrap }
+.nums b { color: var(--ink); font-size: 15px }
+.nums .new b { color: var(--new) }
+ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px }
+li { display: flex; gap: 8px; align-items: baseline }
+li .t { color: var(--muted); white-space: nowrap; min-width: 5.5em }
+li .x { flex: 1 1 auto; overflow-wrap: anywhere }
+.sub { font-size: 12px; color: var(--muted); margin-top: 2px }
+.err { color: var(--new); font-size: 13px }
+.empty { color: var(--muted); font-size: 13px }
+.foot { color: var(--muted); font-size: 12px; margin-top: 28px }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>질문·요청 페이지 모음</h1><span class="upd" id="upd">불러오는 중…</span><button id="again" type="button">새로 보기</button></header>
+  <div id="app"></div>
+  <p class="foot">1분마다 저절로 새로 읽습니다. 페이지 목록은 GitHub 저장소 폴더, 답은 Firebase에서 읽습니다.</p>
+</div>
+<script>
+// 저장소 주소는 이 페이지 주소에서 읽는다(<계정>.github.io/<저장소>/)
+var OWNER = location.hostname.split('.')[0], REPO = location.pathname.split('/')[1] || 'questions';
+var DB = 'https://question-pages-45aae-default-rtdb.asia-southeast1.firebasedatabase.app';
+var pages = null, projects = {};
+var $ = function (id) { return document.getElementById(id) };
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] }) }
+function ago(ms) {
+  if (!ms) return '';
+  var m = Math.round((Date.now() - Number(ms)) / 60000);
+  if (m < 1) return '방금'; if (m < 60) return m + '분 전'; if (m < 1440) return Math.round(m / 60) + '시간 전';
+  var d = new Date(Number(ms)); return (d.getMonth() + 1) + '/' + d.getDate();
+}
+function get(u) { return fetch(u, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json() }) }
+function text(u) { return fetch(u, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.text() }) }
+function cut(s, n) { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s }
+
+// 페이지 목록: 저장소 맨 위 폴더 = 페이지 하나. 페이지 index.html 에서 제목·종류(질문/요청)를 읽는다
+function loadPages() {
+  return Promise.all([
+    get('https://api.github.com/repos/' + OWNER + '/' + REPO + '/contents/').catch(function () { return [] }),
+    get('projects.json').catch(function () { return {} })
+  ]).then(function (r) {
+    projects = r[1] || {};
+    var dirs = (r[0] || []).filter(function (f) { return f.type === 'dir' && f.name[0] !== '.' }).map(function (f) { return f.name });
+    if (!dirs.length) dirs = Object.keys(projects.pages || {});   // GitHub 목록을 못 읽으면(1시간 60번 제한) 적어 둔 목록
+    return Promise.all(dirs.map(function (name) {
+      return text(name + '/index.html').then(function (h) {
+        var t = (h.match(/var TITLE = '((?:[^'\\]|\\.)*)'/) || [])[1] || name;
+        var k = (h.match(/var KIND = '(\w+)'/) || [])[1] || 'question';
+        return { name: name, title: t.replace(/\\(.)/g, '$1'), kind: k };
+      }).catch(function () { return null });
+    }));
+  }).then(function (list) { pages = list.filter(Boolean) });
+}
+
+function loadOne(p) {
+  var base = DB + '/pages/' + p.name;
+  if (p.kind === 'request') return get(base + '/requests.json').then(function (rq) { p.reqs = rq || {}; p.err = '' }).catch(function (e) { p.err = '못 읽음(' + e.message + ')' });
+  return Promise.all([
+    get(base + '/qset/json.json').catch(function () { return null }),
+    get(base + '/answers.json').catch(function (e) { p.err = '답 못 읽음(' + e.message + ')'; return {} })
+  ]).then(function (r) {
+    var qs = r[0] ? JSON.parse(r[0]).questions : null;
+    return (qs ? Promise.resolve(qs) : get(p.name + '/questions.json?t=' + Date.now()).then(function (j) { return j.questions })).then(function (q) { p.qs = q; p.ans = r[1] || {} });
+  }).catch(function (e) { p.err = '못 읽음(' + e.message + ')' });
+}
+
+function card(p) {
+  var h = '<div class="card"><div class="top"><span class="kind ' + p.kind + '">' + (p.kind === 'request' ? '요청' : '질문') + '</span><b>' + esc(p.title) + '</b><a href="' + esc(p.name) + '/" target="_blank" rel="noopener">열기 ↗</a></div>';
+  h += '<div class="sub">' + esc(p.name) + '</div>';
+  if (p.err) return h + '<p class="err">' + esc(p.err) + '</p></div>';
+  if (p.kind === 'request') {
+    var rs = Object.keys(p.reqs || {}).map(function (k) { return p.reqs[k] }).sort(function (a, b) { return (b.at || 0) - (a.at || 0) });
+    var c = { new: 0, doing: 0, done: 0 }; rs.forEach(function (r) { c[r.status || 'new'] = (c[r.status || 'new'] || 0) + 1 });
+    h += '<div class="nums"><span class="new"><b>' + c.new + '</b> 새 요청</span><span><b>' + c.doing + '</b> 하는 중</span><span><b>' + c.done + '</b> 끝</span></div>';
+    var open = rs.filter(function (r) { return r.status !== 'done' }).slice(0, 4);
+    h += open.length ? '<ul>' + open.map(function (r) { return '<li><span class="t">' + esc(ago(r.at)) + '</span><span class="x">' + esc(cut(r.text, 70)) + (r.by ? ' <span class="sub">· ' + esc(r.by) + '</span>' : '') + '</span></li>' }).join('') + '</ul>' : '<p class="empty">남은 요청 없음</p>';
+    return h + '</div>';
+  }
+  var qs = p.qs || [], a = p.ans || {};
+  var has = function (q) { var x = a[q.id] || {}; return !!(x.answer || x.files) };
+  var n = qs.filter(has).length, tot = qs.length, pct = tot ? Math.round(n / tot * 100) : 0;
+  var last = qs.filter(has).map(function (q) { return { q: q, at: (a[q.id] || {}).at || 0 } }).sort(function (x, y) { return y.at - x.at });
+  h += '<div class="bar' + (n === tot && tot ? ' full' : '') + '"><i style="width:' + pct + '%"></i></div>';
+  h += '<div class="nums"><span><b>' + n + '</b>/' + tot + ' 답</span><span>' + (n === tot && tot ? '다 참' : '<b>' + (tot - n) + '</b> 남음') + '</span>' + (last[0] ? '<span>마지막 답 ' + esc(ago(last[0].at)) + '</span>' : '') + '</div>';
+  var left = qs.filter(function (q) { return !has(q) }).slice(0, 3);
+  if (left.length) h += '<ul>' + left.map(function (q) { return '<li><span class="t">' + esc(q.id) + ' 빈칸</span><span class="x">' + esc(cut(q.q, 60)) + '</span></li>' }).join('') + '</ul>';
+  else if (last.length) h += '<ul>' + last.slice(0, 3).map(function (x) { return '<li><span class="t">' + esc(ago(x.at)) + '</span><span class="x">' + esc(x.q.id) + ' ' + esc(cut((a[x.q.id] || {}).answer || '첨부', 50)) + '</span></li>' }).join('') + '</ul>';
+  return h + '</div>';
+}
+
+function render() {
+  if (!pages) return;
+  if (!pages.length) { $('app').innerHTML = '<p class="empty">아직 페이지가 없습니다.</p>'; return }
+  var groups = {};
+  pages.forEach(function (p) { var k = p.name.split('-')[0]; (groups[k] = groups[k] || []).push(p) });
+  var names = projects.projects || {};
+  $('app').innerHTML = Object.keys(groups).sort().map(function (k) {
+    return '<h2>' + esc(names[k] || k) + ' <small>' + esc(k) + '-… · 페이지 ' + groups[k].length + '개</small></h2><div class="grid">' + groups[k].map(card).join('') + '</div>';
+  }).join('');
+  var d = new Date(); $('upd').textContent = d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0') + ' 기준';
+}
+
+function refresh() { return Promise.all((pages || []).map(loadOne)).then(render) }
+$('again').addEventListener('click', function () { $('upd').textContent = '읽는 중…'; loadPages().then(refresh) });
+loadPages().then(refresh);
+setInterval(refresh, 60000);
+</script>
+</body>
+</html>
