@@ -26,6 +26,7 @@
   }
   header.top .in { max-width: 640px; margin: 0 auto; }
   h1 { font-size: 18px; margin: 0 0 8px; font-weight: 700; }
+  .ttl { cursor: default; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
   .who { float: right; font-size: 13px; color: var(--sub); font-weight: 400; margin-top: 3px; }
   .who button { font-size: 13px; padding: 0 0 0 6px; border: 0; background: none; color: var(--sub); }
   .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
@@ -62,6 +63,26 @@
   }
   textarea:focus, input:focus { outline: 2px solid var(--navy); outline-offset: 0; }
   .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .row .push { margin-left: auto; }
+  .qedit label { display: block; font-size: 13px; color: var(--sub); margin: 10px 0 4px; }
+  .qedit label:first-child { margin-top: 0; }
+  .qedit input { width: 100%; font: inherit; font-size: 16px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
+  .qedit textarea { min-height: 70px; }
+  .card.qnew { border-style: dashed; }
+  .sheet-in textarea { min-height: 120px; }
+  /* 설정(제목 10번) */
+  .sheet { position: fixed; inset: 0; z-index: 25; background: rgba(11, 18, 32, .5); display: none; align-items: flex-start; justify-content: center; overflow: auto; }
+  .sheet.on { display: flex; }
+  .sheet-in { background: #fff; width: 100%; max-width: 480px; margin: 24px 16px; border-radius: 14px; padding: 18px 16px; }
+  .sheet-in { position: relative; }
+  .sheet-in h3 { margin: 0 0 4px; font-size: 17px; padding-right: 44px; }
+  .sheet-x { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 18px;
+    background: #fff; color: var(--ink); font-size: 16px; padding: 0; line-height: 34px; text-align: center; }
+  .sheet-in p { margin: 6px 0; font-size: 14px; color: var(--sub); }
+  .note { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--yellow); border-radius: 12px; padding: 12px 16px; margin-top: 16px; }
+  .note .nh { font-size: 13px; color: var(--sub); font-weight: 600; margin-bottom: 2px; }
+  .note p { margin: 0; white-space: pre-wrap; }
+  .note a { color: var(--navy); }
   button { font: inherit; cursor: pointer; }
   .btn { border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 8px; padding: 9px 16px; font-size: 15px; }
   .btn.main { background: var(--yellow); border-color: var(--yellow); font-weight: 600; }
@@ -117,10 +138,13 @@
 <div id="app"></div>
 <input type="file" id="pick" multiple hidden>
 <div class="viewer" id="viewer"></div>
+<div class="sheet" id="sheet"></div>
 <script type="module">
 // 질문 페이지: 질문은 같은 폴더의 questions.json(GitHub), 답은 Firebase Realtime Database.
 //   답: pages/<PAGE>/answers/<질문 id> = { answer, by, at, editing, files: { <fid>: { name, type, size, w, h, t(작은 사진) } } }
 //   첨부 원본: pages/<PAGE>/blobs/<fid> = { d: data URL }  ← 크게 볼 때만 불러온다
+//   질문 목록: 처음엔 questions.json. 운영진 모드(제목을 10번 누름)에서 질문을 고치면 pages/<PAGE>/qset = { json: '{notice, questions}', at, by }에 저장되고,
+//             그 뒤로는 qset이 원본이다(questions.json은 쓰이지 않음).
 // 아래 네 값은 '새 질문 페이지.sh'가 채운다.
 var TITLE = '팀준 운영진 질문';
 var PAGE = 'swim-question';          // Firebase 안에서 이 페이지 답이 들어가는 칸 이름 (pages/<PAGE>/answers)
@@ -132,8 +156,8 @@ var MAX_FILE = 5 * 1024 * 1024;   // 사진이 아닌 파일 한 개 최대 크�
 var MAX_FILES = 10;               // 답 하나에 넣는 첨부 개수
 
 var DEMO = /[?&]demo\b/.test(location.search);
-var S = { name: '', qs: null, notice: [], answers: {}, filter: 'all', open: {}, drafts: {}, dfiles: {}, bfiles: {}, bwas: {}, bases: {}, conflict: {}, busy: {}, err: {}, live: false };
-var $app = document.getElementById('app'), $pick = document.getElementById('pick'), $viewer = document.getElementById('viewer');
+var S = { admin: false, qe: {}, qerr: {}, fromFb: false, sheetNotice: '', name: '', qs: null, notice: [], answers: {}, filter: 'all', open: {}, drafts: {}, dfiles: {}, bfiles: {}, bwas: {}, bases: {}, conflict: {}, busy: {}, err: {}, live: false };
+var $app = document.getElementById('app'), $pick = document.getElementById('pick'), $viewer = document.getElementById('viewer'), $sheet = document.getElementById('sheet');
 var fb = null; // { db, ref, set, remove, onValue, runTransaction, onDisconnect }
 
 function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
@@ -278,6 +302,11 @@ async function connect() {
          putBlob: function (fid, data) { return d.set(d.ref(db, 'pages/' + PAGE + '/blobs/' + fid), { d: data }); },
          getBlob: function (fid) { return d.get(d.ref(db, 'pages/' + PAGE + '/blobs/' + fid + '/d')).then(function (s) { return s.val(); }); },
          delBlob: function (fid) { return d.remove(d.ref(db, 'pages/' + PAGE + '/blobs/' + fid)).catch(function () {}); } };
+  fb.saveQs = function (v) { return d.set(d.ref(db, 'pages/' + PAGE + '/qset'), v); };
+  d.onValue(d.ref(db, 'pages/' + PAGE + '/qset/json'), function (snap) {
+    var j = snap.val(); if (!j) return;
+    try { var o = JSON.parse(j); S.qs = o.questions || []; S.notice = o.notice || []; S.fromFb = true; render(); } catch (e) {}
+  });
   d.onValue(fb.ref(), function (snap) { S.answers = snap.val() || {}; S.live = true; render(); },
     function (err) { toast('답을 불러오지 못했습니다: ' + err.message); });
 }
@@ -325,14 +354,15 @@ async function saveAnswer(id, text, base, force) {
 // ---------- 화면 ----------
 function render() {
   if (!S.qs) { $app.innerHTML = '<div class="gate"><p>불러오는 중…</p></div>'; return; }
-  var act = document.activeElement, actId = act && act.dataset ? act.dataset.id : null, sel = actId ? [act.selectionStart, act.selectionEnd] : null;
+  var act = document.activeElement, actId = act && act.dataset ? act.dataset.id : null, elId = act && act.id && /^qe-/.test(act.id) ? act.id : '';
+  var sel = actId || elId ? [act.selectionStart, act.selectionEnd] : null;
   var y = window.scrollY;
 
   var items = S.qs, total = items.length;
   var done = items.filter(function (q) { return hasAns(ans(q.id)); }).length;
   var pct = total ? Math.round(done / total * 100) : 0;
   var h = '<header class="top"><div class="in">';
-  h += '<h1>' + esc(TITLE) + ' <span class="who">' + (S.name ? esc(S.name) + '<button data-act="rename">이름 바꾸기</button>' : '<button data-act="rename">이름 넣기</button>') + '</span></h1>';
+  h += '<h1><span class="ttl" data-act="title">' + esc(TITLE) + '</span> <span class="who">' + (S.name ? esc(S.name) + '<button data-act="rename">이름 바꾸기</button>' : '<button data-act="rename">이름 넣기</button>') + '</span></h1>';
   h += '<div class="bar"><i style="width:' + pct + '%"></i></div>';
   h += '<div class="count"><span><b>' + done + '</b> / ' + total + ' 작성됨 · 남은 ' + (total - done) + '</span>';
   h += '<span class="seg"><button data-act="filter" data-v="all" class="' + (S.filter === 'all' ? 'on' : '') + '">전체</button>';
@@ -350,11 +380,19 @@ function render() {
     if (q.cat !== lastCat) { h += '<h2>' + esc(q.cat) + '</h2>'; lastCat = q.cat; }
     h += card(q);
   });
+  if (S.admin) {
+    if (S.qe.__new) h += '<h2>새 질문</h2><div class="card qnew">' + qform('__new') + '</div>';
+    else h += '<div class="row" style="justify-content:center;margin-top:16px"><button class="btn" data-act="qnew">+ 질문 더하기</button></div>';
+    h += '<datalist id="cats">' + uniq(S.qs.map(function (q) { return q.cat; })).map(function (c) { return '<option value="' + esc(c) + '">'; }).join('') + '</datalist>';
+  }
   if (done) h += '<div class="row" style="justify-content:center;margin-top:24px"><button class="btn" data-act="export">답 내려받기 (엑셀용 CSV)</button></div>';
   h += '</div>';
   $app.innerHTML = h;
   window.scrollTo(0, y);
-  if (actId) {
+  if (elId) {
+    var el = document.getElementById(elId);
+    if (el) { el.focus({ preventScroll: true }); try { el.setSelectionRange(sel[0], sel[1]); } catch (e) {} }
+  } else if (actId) {
     var t = $app.querySelector('textarea[data-id="' + actId + '"]');
     if (t) { t.focus({ preventScroll: true }); try { t.setSelectionRange(sel[0], sel[1]); } catch (e) {} }
   }
@@ -369,13 +407,16 @@ function card(q) {
   else if (other) h += '<span class="st editing">✏️ ' + esc(shown(ed.name)) + ' 작성 중</span>';
   else h += '<span class="st empty">아직 답 없음</span>';
   if (has && other) h += ' <span class="st editing">✏️ ' + esc(shown(ed.name)) + ' 고치는 중</span>';
+  if (S.admin && S.qe[q.id]) return h + qform(q.id) + '</div>';
   h += '<p class="q">' + esc(q.q) + '</p>';
   if (q.notes && q.notes.length) h += '<ul class="notes">' + q.notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>';
 
   if (!mine) {
     if (a.answer) h += '<div class="ans">' + esc(a.answer) + '</div>';
     if (a.files) h += attHtml(fileList(a.files), q.id, false);
-    h += '<div class="row"><button class="btn ' + (has ? '' : 'main') + '" data-act="open" data-id="' + q.id + '">' + (has ? '수정하기' : '답 쓰기') + '</button></div>';
+    h += '<div class="row"><button class="btn ' + (has ? '' : 'main') + '" data-act="open" data-id="' + q.id + '">' + (has ? '수정하기' : '답 쓰기') + '</button>';
+    if (S.admin) h += '<button class="btn push" data-act="qedit" data-id="' + q.id + '">질문 고치기</button>';
+    h += '</div>';
   } else {
     if (other) h += '<div class="warn">' + esc(shown(ed.name)) + '님도 지금 이 질문을 쓰고 있어요. 겹치지 않게 말을 맞춰 주세요.</div>';
     var c = S.conflict[q.id];
@@ -413,8 +454,68 @@ function exportCsv() {
   document.body.appendChild(a); a.click(); a.remove();
 }
 
+// ---------- 운영진 모드(제목을 10번 누르면): 질문 더하기·고치기·지우기, '먼저 읽어 주세요' 글 고치기 ----------
+var taps = 0, lastTap = 0;
+function uniq(a) { return a.filter(function (x, i) { return x && a.indexOf(x) === i; }); }
+function qform(key) {
+  var e = S.qe[key], isNew = key === '__new', er = S.qerr[key];
+  var h = '<div class="qedit"><label for="qe-c-' + key + '">분류</label><input id="qe-c-' + key + '" data-qe="' + key + '" data-k="cat" list="cats" maxlength="60" value="' + esc(e.cat) + '" placeholder="예: 가. 꼭 먼저">';
+  h += '<label for="qe-q-' + key + '">질문</label><textarea id="qe-q-' + key + '" data-qe="' + key + '" data-k="q" maxlength="1000">' + esc(e.q) + '</textarea>';
+  h += '<label for="qe-n-' + key + '">설명 줄 (한 줄에 하나, 없어도 됨)</label><textarea id="qe-n-' + key + '" data-qe="' + key + '" data-k="notes" maxlength="2000" placeholder="예: 왜 여쭙나요: …">' + esc(e.notes) + '</textarea>';
+  h += '<div class="row"><button class="btn main" data-act="qsave" data-id="' + key + '">' + (isNew ? '질문 더하기' : '질문 저장') + '</button><button class="btn" data-act="qcancel" data-id="' + key + '">취소</button>';
+  if (!isNew) h += '<button class="btn red push" data-act="qdel" data-id="' + key + '">질문 지우기</button>';
+  h += '</div><div class="msg' + (er ? ' bad' : '') + '">' + esc(er || (S.fromFb ? '' : '처음 저장하면 질문 목록이 페이지 저장소로 옮겨지고, 그 뒤로는 여기서 고친 목록을 씁니다.')) + '</div></div>';
+  return h;
+}
+function nextId() {
+  var n = 0;
+  S.qs.map(function (q) { return q.id; }).concat(Object.keys(S.answers)).forEach(function (k) { var m = /^q(\d+)$/.exec(k); if (m) n = Math.max(n, +m[1]); });
+  return 'q' + (n + 1);
+}
+function saveQs(list, notice) {
+  if (DEMO) { S.qs = list; S.notice = notice; S.fromFb = true; demo.qset = { questions: list, notice: notice }; return Promise.resolve(); }
+  return fb.saveQs({ json: JSON.stringify({ notice: notice, questions: list }), at: Date.now(), by: me().slice(0, 30) });
+}
+function qsave(key) {
+  var e = S.qe[key], cat = e.cat.trim(), qt = e.q.trim();
+  if (!cat || !qt) { S.qerr[key] = !cat ? '분류를 적어 주세요' : '질문을 적어 주세요'; render(); return; }
+  var item = { id: key === '__new' ? nextId() : key, cat: cat, q: qt, notes: e.notes.split('\n').map(function (s) { return s.trim(); }).filter(Boolean) };
+  var list = S.qs.map(function (x) { return x.id === key ? item : x; });
+  if (key === '__new') {
+    var at = -1; list.forEach(function (x, i) { if (x.cat === cat) at = i; });
+    if (at < 0) list.push(item); else list.splice(at + 1, 0, item);
+  }
+  saveQs(list, S.notice).then(function () { delete S.qe[key]; delete S.qerr[key]; toast(key === '__new' ? '질문을 더했습니다' : '질문을 저장했습니다'); render(); })
+    .catch(function (err) { S.qerr[key] = '저장하지 못했어요: ' + err.message; render(); });
+}
+function openSheet() {
+  S.admin = true; store('qp_admin', '1'); S.sheetNotice = S.notice.join('\n\n'); render(); drawSheet(); $sheet.classList.add('on');
+}
+function drawSheet(msg) {
+  var h = '<div class="sheet-in"><button class="sheet-x" data-s="close" aria-label="닫기">✕</button><h3>운영진 모드</h3>';
+  h += '<p>이 기기에서 질문마다 \'질문 고치기\' 단추와 맨 아래 \'질문 더하기\' 단추가 보입니다.</p>';
+  h += '<h3 style="margin-top:16px">먼저 읽어 주세요 글</h3><p>맨 위 상자에 보이는 글입니다. 빈 줄로 문단을 나눕니다. 모두 지우고 저장하면 상자가 사라집니다.</p>';
+  h += '<textarea id="sheet-notice" maxlength="5000">' + esc(S.sheetNotice) + '</textarea>';
+  h += '<div class="row"><button class="btn main" data-s="save">글 저장</button><button class="btn push" data-s="close">닫기</button></div>';
+  h += '<div class="msg">' + esc(msg || '') + '</div>';
+  h += '<div class="row" style="margin-top:14px"><button class="btn" data-s="off">이 기기에서 운영진 모드 끄기</button></div>';
+  $sheet.innerHTML = h + '</div>';
+}
+$sheet.addEventListener('input', function (e) { if (e.target.id === 'sheet-notice') S.sheetNotice = e.target.value; });
+$sheet.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-s]'); if (!b) return;
+  var s = b.dataset.s;
+  if (s === 'save') {
+    var notice = S.sheetNotice.split(/\n\s*\n/).map(function (x) { return x.trim(); }).filter(Boolean);
+    saveQs(S.qs, notice).then(function () { S.notice = notice; render(); drawSheet('저장했습니다'); }).catch(function (err) { drawSheet('저장하지 못했어요: ' + err.message); });
+  } else if (s === 'off') {
+    S.admin = false; S.qe = {}; store('qp_admin', null); $sheet.classList.remove('on'); render();
+  } else if (s === 'close') { $sheet.classList.remove('on'); }
+});
+
 // ---------- 누르기 ----------
 $app.addEventListener('input', function (e) {
+  if (e.target.dataset.qe) { S.qe[e.target.dataset.qe][e.target.dataset.k] = e.target.value; return; }
   if (e.target.tagName === 'TEXTAREA') S.drafts[e.target.dataset.id] = e.target.value;
 });
 $app.addEventListener('paste', function (e) {
@@ -427,7 +528,22 @@ $pick.addEventListener('change', function () { addFiles(pickFor, $pick.files).th
 $app.addEventListener('click', function (e) {
   var b = e.target.closest('[data-act]'); if (!b) return;
   var act = b.dataset.act, id = b.dataset.id;
-  if (act === 'rename') {
+  if (act === 'title') {
+    var now = Date.now(); taps = now - lastTap < 1500 ? taps + 1 : 1; lastTap = now;
+    if (taps >= 10) { taps = 0; openSheet(); }
+  } else if (act === 'qedit' || act === 'qnew') {
+    var key = act === 'qnew' ? '__new' : id, q0 = act === 'qnew' ? { cat: (S.qs[S.qs.length - 1] || {}).cat || '', q: '', notes: [] } : S.qs.filter(function (x) { return x.id === id; })[0];
+    S.qe[key] = { cat: q0.cat || '', q: q0.q || '', notes: (q0.notes || []).join('\n') }; delete S.qerr[key]; render();
+    var f = document.getElementById('qe-q-' + key); if (f) f.focus();
+  } else if (act === 'qcancel') {
+    delete S.qe[id]; delete S.qerr[id]; render();
+  } else if (act === 'qsave') {
+    qsave(id);
+  } else if (act === 'qdel') {
+    if (!window.confirm('이 질문을 지울까요? 이미 받은 답도 화면에서 사라집니다.')) return;
+    var rest = S.qs.filter(function (x) { return x.id !== id; });
+    saveQs(rest, S.notice).then(function () { delete S.qe[id]; toast('질문을 지웠습니다'); render(); }).catch(function (err) { toast('지우지 못했어요: ' + err.message); });
+  } else if (act === 'rename') {
     var n = window.prompt('이름 (답 옆에 표시돼요. 비우면 익명)', S.name);
     if (n !== null) { S.name = n.trim().slice(0, 30); store('qp_name', S.name || null); render(); }
   } else if (act === 'filter') {
@@ -481,7 +597,7 @@ function save(id, force) {
 }
 
 // 1분마다 다시 그려 '3분 전' 같은 시간과 작성 중 표시를 새로 맞춘다
-setInterval(function () { if (!Object.keys(S.open).length) render(); }, 60000);
+setInterval(function () { if (!Object.keys(S.open).length && !Object.keys(S.qe).length) render(); }, 60000);
 
 // ---------- 시험용 가짜 저장소 (?demo) ----------
 var demo = null;
@@ -492,7 +608,7 @@ function demoConnect() {
   };
   function push() { S.answers = JSON.parse(JSON.stringify(db)); S.live = true; render(); }
   demo = {
-    db: db, blobs: {},
+    db: db, blobs: {}, qset: null,
     claim: function (id, v) { db[id] = db[id] || {}; db[id].editing = v; push(); },
     release: function (id, n) { if (db[id] && db[id].editing && db[id].editing.name === n) delete db[id].editing; push(); },
     save: function (id, text, base, force, files) {
@@ -512,7 +628,7 @@ var DEMO_QS = { notice: ['https://example.com/', '시험용 안내 글입니다.
   { id: 'q3', cat: '나. 시간 될 때', q: '시험 질문 3: 아직 답 없음', notes: [] } ] };
 
 // ---------- 시작 ----------
-S.name = load('qp_name');
+S.name = load('qp_name'); S.admin = load('qp_admin') === '1';
 render();
 (DEMO ? Promise.resolve(DEMO_QS) : fetch('questions.json', { cache: 'no-cache' }).then(function (r) { return r.json(); }))
   .then(function (d) { S.qs = d.questions; S.notice = d.notice || []; render(); return connect(); })
