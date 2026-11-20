@@ -332,6 +332,8 @@ async function view(owner, fid) {
   $viewer.innerHTML = '<div class="vbar"><button class="btn" data-v="close">닫기</button><span class="nm">' + esc(m.name) + (m.w ? ' · ' + m.w + '×' + m.h : '') +
     '</span><button class="btn" data-v="real">실제 크기</button><a class="btn" data-v="save" download="' + esc(m.name) + '">받기</a></div><div class="vbody"><p>불러오는 중…</p></div>';
   $viewer.classList.add('on'); document.body.style.overflow = 'hidden';
+  // 휴대폰 '뒤로'가 페이지를 떠나지 않고 크게 보기만 닫게, 열 때 기록 한 칸을 넣는다
+  if (!(history.state && history.state.viewer)) history.pushState({ viewer: 1 }, '');
   try {
     var src = f.d ? f.d : await blobUrl(fid);
     if (!$viewer.classList.contains('on')) return;
@@ -341,10 +343,12 @@ async function view(owner, fid) {
 }
 $viewer.addEventListener('click', function (e) {
   var b = e.target.closest('[data-v]'); if (!b) return;
-  if (b.dataset.v === 'close') { $viewer.classList.remove('on'); $viewer.innerHTML = ''; document.body.style.overflow = ''; }
+  if (b.dataset.v === 'close') { if (history.state && history.state.viewer) history.back(); else closeViewer(); }
   else if (b.dataset.v === 'real') { var v = $viewer.querySelector('.vbody'); v.classList.toggle('real'); b.textContent = v.classList.contains('real') ? '화면에 맞춤' : '실제 크기'; }
 });
 document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && $viewer.classList.contains('on')) $viewer.querySelector('[data-v="close"]').click(); });
+function closeViewer() { $viewer.classList.remove('on'); $viewer.innerHTML = ''; document.body.style.overflow = ''; }
+window.addEventListener('popstate', function () { if ($viewer.classList.contains('on')) closeViewer(); });
 
 // ---------- 저장소(Firebase) ----------
 async function connect() {
