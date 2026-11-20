@@ -52,6 +52,8 @@
   .reply .rh b { color: var(--navy); }
   .reply p { margin: 0; white-space: pre-wrap; }
   .reply-edit { margin-top: 10px; }
+  .ebtn { margin-left: auto; flex: none; border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 6px; padding: 2px 10px; font-size: 13px; }
+  .ebtn:disabled { opacity: .5; }
   .adm .btn { padding: 6px 12px; font-size: 14px; }
   .adm .rbtn { min-width: 4.2em; }
   .reply-edit textarea { min-height: 80px; }
@@ -150,7 +152,7 @@ var MAX_FILES = 10;               // 요청 하나에 넣는 첨부 개수
 var STATUS = { new: '새 요청', doing: '하는 중', done: '끝' };
 
 var DEMO = /[?&]demo\b/.test(location.search);
-var S = { note: '', sheetNote: '', rOpen: {}, rDraft: {}, rBusy: {}, name: '', reqs: {}, live: false, filter: 'open', text: '', files: [], busy: '', err: '', admin: false, hours: '', sheetHours: null };
+var S = { ed: {}, mine: [], note: '', sheetNote: '', rOpen: {}, rDraft: {}, rBusy: {}, name: '', reqs: {}, live: false, filter: 'open', text: '', files: [], busy: '', err: '', admin: false, hours: '', sheetHours: null };
 var $app = document.getElementById('app'), $pick = document.getElementById('pick'), $viewer = document.getElementById('viewer'), $sheet = document.getElementById('sheet');
 var fb = null;
 
@@ -210,15 +212,18 @@ async function prep(file) {
   if (file.size > MAX_FILE) throw new Error('"' + file.name + '"은 ' + kb(file.size) + '라 넣을 수 없어요(파일은 ' + kb(MAX_FILE) + '까지)');
   return { id: newId(), d: await readUrl(file), meta: { name: (file.name || '파일').slice(0, 200), type: (file.type || 'application/octet-stream').slice(0, 100), size: file.size } };
 }
-async function addFiles(list) {
+// target: 비우면 새 요청, 요청 id면 고치는 중인 그 요청
+async function addFiles(list, target) {
   list = Array.prototype.slice.call(list || []);
-  if (!list.length) return;
-  if (S.files.length + list.length > MAX_FILES) { S.err = '첨부는 요청 하나에 ' + MAX_FILES + '개까지예요'; render(); return; }
-  S.err = ''; S.busy = 'prep'; render();
+  var e = target ? S.ed[target] : null;
+  if (!list.length || (target && !e)) return;
+  var cur = e ? e.files : S.files, setErr = function (m) { if (e) e.err = m; else S.err = m; };
+  if (cur.length + list.length > MAX_FILES) { setErr('첨부는 요청 하나에 ' + MAX_FILES + '개까지예요'); render(); return; }
+  setErr(''); if (e) e.busy = 'prep'; else S.busy = 'prep'; render();
   for (var i = 0; i < list.length; i++) {
-    try { S.files.push(await prep(list[i])); } catch (e) { S.err = e.message; }
+    try { cur.push(await prep(list[i])); } catch (x) { setErr(x.message); }
   }
-  S.busy = ''; render();
+  if (e) e.busy = ''; else S.busy = ''; render();
 }
 
 // ---------- 첨부 보이기 ----------
@@ -228,7 +233,7 @@ function isImg(m) { return /^image\//.test(m.type) && m.t; }
 function attHtml(files, owner, draft) {
   var imgs = '', docs = '';
   files.forEach(function (f) {
-    var m = f.meta, x = draft ? '<button class="att-x" data-act="unattach" data-f="' + f.id + '" aria-label="빼기">✕</button>' : '';
+    var m = f.meta, x = draft ? '<button class="att-x" data-act="unattach" data-o="' + owner + '" data-f="' + f.id + '" aria-label="빼기">✕</button>' : '';
     var key = ' data-f="' + f.id + '" data-o="' + owner + '"';
     if (isImg(m)) imgs += '<span class="att-img"><button class="att-open" data-act="view"' + key + ' aria-label="크게 보기"><img src="' + m.t + '" alt=""></button>' + x + '</span>';
     else docs += '<span class="att-file"><span class="ext">' + esc(ext(m)) + '</span><button class="att-name" data-act="view"' + key + '>' + esc(m.name) + '<span class="sz">' + kb(m.size) + ' · 눌러서 열기</span></button>' + x + '</span>';
@@ -245,7 +250,10 @@ async function blobUrl(fid) {
   return (cache[fid] = URL.createObjectURL(b));
 }
 function findFile(owner, fid) {
-  if (owner === 'draft') { var f = S.files.filter(function (x) { return x.id === fid; })[0]; return f && { meta: f.meta, d: f.d }; }
+  if (owner === 'draft' || /^ed:/.test(owner)) {
+    var list = owner === 'draft' ? S.files : (S.ed[owner.slice(3)] || {}).files || [];
+    var f = list.filter(function (x) { return x.id === fid; })[0]; return f && { meta: f.meta, d: f.d };
+  }
   var r = S.reqs[owner]; return r && r.files && r.files[fid] ? { meta: r.files[fid] } : null;
 }
 async function view(owner, fid) {
@@ -293,6 +301,7 @@ async function connect() {
     setStatus: function (id, st) { return d.set(R('requests/' + id + '/status'), st); },
     setReply: function (id, v) { return v ? d.set(R('requests/' + id + '/reply'), v) : d.remove(R('requests/' + id + '/reply')); },
     delReq: function (id) { return d.remove(R('requests/' + id)); },
+    editReq: function (id, v) { return d.update(R('requests/' + id), v); },
     setHours: function (h) { return d.set(R('settings/hours'), h); },
     setNote: function (t) { return t ? d.set(R('settings/note'), t) : d.remove(R('settings/note')); }
   };
@@ -318,11 +327,33 @@ async function send() {
     if (n) v.files = files;
     var id = newId();
     if (DEMO) demo.put(id, v); else await fb.putReq(id, v);
+    S.mine.push(id); store('rq_mine', JSON.stringify(S.mine.slice(-200)));
     S.text = ''; S.files = []; store('rq_draft', null); S.busy = ''; render();
     toast('요청을 보냈습니다');
   } catch (e) {
     S.busy = ''; S.err = '보내지 못했어요: ' + (e && e.message || '인터넷 연결을 확인해 주세요'); render();
   }
+}
+
+// 요청 고치기: 쓴 사람(이 기기에서 보낸 요청)과 운영진. 새 첨부 원본을 먼저 올리고, 글·첨부 목록을 바꾼 뒤, 뺀 첨부 원본을 지운다
+async function esave(id) {
+  var e = S.ed[id]; if (!e) return;
+  var text = e.text.trim();
+  if (!text && !e.files.length) { e.err = '요청 내용을 적거나 첨부를 넣어 주세요'; render(); return; }
+  e.busy = 'save'; e.err = ''; render();
+  try {
+    var map = null;
+    for (var i = 0; i < e.files.length; i++) {
+      var f = e.files[i];
+      if (f.d && !f.up) { if (DEMO) demo.blobs[f.id] = f.d; else await fb.putBlob(f.id, f.d); f.up = true; }
+      (map = map || {})[f.id] = f.meta;
+    }
+    var gone = Object.keys((S.reqs[id] || {}).files || {}).filter(function (k) { return !map || !map[k]; });
+    var v = { text: text || null, files: map };
+    if (DEMO) demo.edit(id, v); else await fb.editReq(id, v);
+    gone.forEach(function (k) { if (DEMO) delete demo.blobs[k]; else fb.delBlob(k); });
+    delete S.ed[id]; toast('고친 내용을 저장했습니다'); render();
+  } catch (err) { e.busy = ''; e.err = '저장하지 못했어요: ' + (err && err.message || '인터넷 연결을 확인해 주세요'); render(); }
 }
 
 // ---------- 화면 ----------
@@ -369,10 +400,20 @@ function render() {
 function card(r) {
   var st = r.status in STATUS ? r.status : 'new';
   var h = '<div class="card c-' + st + '" id="r-' + r.id + '">';
-  h += '<div class="head"><span class="st s-' + st + '">' + STATUS[st] + '</span><span>' + esc(r.by || '익명') + ' · ' + ago(r.at) + '</span></div>';
-  if (r.text) h += '<p class="txt">' + linkify(r.text) + '</p>';
+  var canEdit = S.admin || S.mine.indexOf(r.id) >= 0, ed = S.ed[r.id];
+  h += '<div class="head"><span class="st s-' + st + '">' + STATUS[st] + '</span><span>' + esc(r.by || '익명') + ' · ' + ago(r.at) + '</span>';
+  if (canEdit) h += '<button class="ebtn" data-act="eopen" data-id="' + r.id + '"' + (ed ? ' disabled' : '') + '>고치기</button>';
+  h += '</div>';
+  if (ed) {
+    h += '<div class="reply-edit"><textarea id="ed-' + r.id + '" data-eid="' + r.id + '" maxlength="5000">' + esc(ed.text) + '</textarea>';
+    h += attHtml(ed.files, 'ed:' + r.id, !ed.busy);
+    h += '<div class="row"><button class="btn main" data-act="esave" data-id="' + r.id + '"' + (ed.busy ? ' disabled' : '') + '>고친 내용 저장</button>';
+    h += '<button class="btn" data-act="attach" data-id="' + r.id + '"' + (ed.busy ? ' disabled' : '') + '>사진·파일 넣기</button>';
+    h += '<button class="btn push" data-act="eclose" data-id="' + r.id + '">취소</button></div>';
+    h += '<div class="msg' + (ed.err ? ' bad' : '') + '">' + esc(ed.busy === 'prep' ? '사진 준비 중…' : ed.busy ? '저장 중…' : ed.err || '') + '</div></div>';
+  } else if (r.text) h += '<p class="txt">' + linkify(r.text) + '</p>';
   var files = Object.keys(r.files || {}).map(function (k) { return { id: k, meta: r.files[k] }; });
-  if (files.length) h += attHtml(files, r.id, false);
+  if (files.length && !ed) h += attHtml(files, r.id, false);
   var rp = r.reply && r.reply.text ? r.reply : null;
   if (rp && !S.rOpen[r.id]) h += '<div class="reply"><div class="rh"><b>답글</b> · ' + ago(rp.at) + '</div><p>' + linkify(rp.text) + '</p></div>';
   if (S.admin && S.rOpen[r.id]) {
@@ -440,15 +481,18 @@ $sheet.addEventListener('click', function (e) {
 $app.addEventListener('input', function (e) {
   if (e.target.id === 'rq-text') { S.text = e.target.value; store('rq_draft', S.text || null); }
   else if (e.target.dataset.rid) S.rDraft[e.target.dataset.rid] = e.target.value;
+  else if (e.target.dataset.eid && S.ed[e.target.dataset.eid]) S.ed[e.target.dataset.eid].text = e.target.value;
 });
 $app.addEventListener('paste', function (e) {
   var fs = e.clipboardData && e.clipboardData.files;
   if (fs && fs.length && e.target.id === 'rq-text') { e.preventDefault(); addFiles(fs); }
+  else if (fs && fs.length && e.target.dataset.eid) { e.preventDefault(); addFiles(fs, e.target.dataset.eid); }
 });
 $app.addEventListener('dragover', function (e) { if (e.target.closest('#rq-form')) { e.preventDefault(); e.target.closest('#rq-form').classList.add('drop'); } });
 $app.addEventListener('dragleave', function (e) { var f = e.target.closest('#rq-form'); if (f) f.classList.remove('drop'); });
 $app.addEventListener('drop', function (e) { var f = e.target.closest('#rq-form'); if (f) { e.preventDefault(); f.classList.remove('drop'); addFiles(e.dataTransfer.files); } });
-$pick.addEventListener('change', function () { var fs = $pick.files; addFiles(fs).then(function () { $pick.value = ''; }); });
+var pickFor = null;
+$pick.addEventListener('change', function () { var fs = $pick.files; addFiles(fs, pickFor).then(function () { $pick.value = ''; }); });
 
 $app.addEventListener('click', function (e) {
   var b = e.target.closest('[data-act]'); if (!b) return;
@@ -462,9 +506,20 @@ $app.addEventListener('click', function (e) {
   } else if (act === 'filter') {
     S.filter = b.dataset.v; render();
   } else if (act === 'attach') {
-    $pick.click();
+    pickFor = id || null; $pick.click();
   } else if (act === 'unattach') {
-    S.files = S.files.filter(function (f) { return f.id !== b.dataset.f; }); S.err = ''; render();
+    var o = b.dataset.o, keep = function (f) { return f.id !== b.dataset.f; };
+    if (/^ed:/.test(o)) { var ee = S.ed[o.slice(3)]; if (ee) { ee.files = ee.files.filter(keep); ee.err = ''; } }
+    else { S.files = S.files.filter(keep); S.err = ''; }
+    render();
+  } else if (act === 'eopen') {
+    var r0 = S.reqs[id] || {};
+    S.ed[id] = { text: r0.text || '', files: Object.keys(r0.files || {}).map(function (k) { return { id: k, meta: r0.files[k] }; }), err: '', busy: '' };
+    render(); var et = document.getElementById('ed-' + id); if (et) et.focus();
+  } else if (act === 'eclose') {
+    delete S.ed[id]; render();
+  } else if (act === 'esave') {
+    esave(id);
   } else if (act === 'send') {
     send();
   } else if (act === 'view') {
@@ -493,7 +548,7 @@ $app.addEventListener('click', function (e) {
 });
 
 // 1분마다 다시 그려 '3분 전' 같은 시간을 새로 맞춘다(쓰는 중이면 건너뜀)
-setInterval(function () { if (!S.busy && !Object.keys(S.rOpen).length && document.activeElement && document.activeElement.tagName !== 'TEXTAREA') render(); }, 60000);
+setInterval(function () { if (!S.busy && !Object.keys(S.rOpen).length && !Object.keys(S.ed).length && document.activeElement && document.activeElement.tagName !== 'TEXTAREA') render(); }, 60000);
 
 // ---------- 시험용 가짜 저장소 (?demo) ----------
 var demo = null;
@@ -507,6 +562,7 @@ function demoConnect() {
   demo = {
     blobs: {}, settings: { hours: '9,18' },
     put: function (id, v) { db[id] = v; push(); },
+    edit: function (id, v) { Object.keys(v).forEach(function (k) { if (v[k] == null) delete db[id][k]; else db[id][k] = v[k]; }); push(); },
     status: function (id, v) { db[id].status = v; push(); },
     reply: function (id, v, done) { if (v) db[id].reply = v; else delete db[id].reply; if (done) db[id].status = 'done'; push(); },
     del: function (id) { delete db[id]; push(); }
@@ -517,6 +573,7 @@ function demoConnect() {
 
 // ---------- 시작 ----------
 S.name = load('qp_name'); S.text = load('rq_draft'); S.admin = load('rq_admin') === '1';
+try { S.mine = JSON.parse(load('rq_mine') || '[]'); } catch (e) { S.mine = []; }
 render();
 connect().catch(function (err) { $app.innerHTML = '<div class="gate"><p>불러오지 못했습니다: ' + esc(err && err.message) + '</p></div>'; });
 window.__rq = { S: S, demo: function () { return demo; }, addFiles: addFiles }; // 점검용
