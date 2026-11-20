@@ -124,11 +124,14 @@
   .note .nh { font-size: 13px; color: var(--sub); font-weight: 600; margin-bottom: 2px; }
   .note p { margin: 0; white-space: pre-wrap; }
   .note a { color: var(--navy); }
-  .period { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--navy); border-radius: 12px; padding: 12px 16px; margin-top: 16px; }
-  .period .nh { font-size: 13px; color: var(--sub); font-weight: 600; }
-  .period b { font-size: 18px; }
-  .period .to { font-size: 13px; color: var(--sub); }
-  .period.over { border-left-color: var(--line); color: var(--sub); }
+  .pd { font-size: 12px; font-weight: 400; color: var(--sub); margin-left: 6px; white-space: nowrap; }   /* 수정 기간: 제목 옆 작게(2026-11-20 저자 '잘 안 보이게, 정 없다') */
+  details.note summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 8px; }
+  details.note summary::-webkit-details-marker { display: none; }
+  details.note .nh { margin: 0; flex: none; }
+  details.note .nprev { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+  details.note .nmore { flex: none; font-size: 12px; color: var(--sub); }
+  details.note[open] .nprev { visibility: hidden; }
+  details.note p { margin-top: 8px; }
   .sheet-in textarea { min-height: 90px; }
   .topic { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: #f7f9fc; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; word-break: break-all; color: var(--ink); }
 </style>
@@ -372,14 +375,14 @@ function render() {
   all.forEach(function (r) { c[r.status in c ? r.status : 'new']++; });
 
   var h = '<header class="top"><div class="in">';
-  h += '<h1><span class="ttl" data-act="title">' + esc(TITLE) + '</span> <span class="who">' + (S.name ? esc(S.name) + '<button data-act="rename">이름 바꾸기</button>' : '<button data-act="rename">이름 넣기</button>') + '</span></h1>';
+  h += '<h1><span class="ttl" data-act="title">' + esc(TITLE) + '</span>' + (S.until ? '<span class="pd" id="period">' + periodText() + '</span>' : '') + ' <span class="who">' + (S.name ? esc(S.name) + '<button data-act="rename">이름 바꾸기</button>' : '<button data-act="rename">이름 넣기</button>') + '</span></h1>';
   h += '<div class="count"><span>남은 요청 <b>' + (c.new + c.doing) + '</b> · 끝 ' + c.done + '</span>';
   h += '<span class="seg"><button data-act="filter" data-v="open" class="' + (S.filter === 'open' ? 'on' : '') + '">남은 것</button>';
   h += '<button data-act="filter" data-v="all" class="' + (S.filter === 'all' ? 'on' : '') + '">전체</button></span></div>';
   h += '</div></header><div class="wrap">';
 
-  if (S.note) h += '<div class="note"><div class="nh">알려 드려요</div><p>' + linkify(S.note) + '</p></div>';
-  if (S.until) h += '<div class="period" id="period">' + periodHtml() + '</div>';
+  // 맨 위 한마디는 접어 둔다(2026-11-20 저자 '길게 넣으니 계속 내려야 함'). 첫 줄만 보이고 누르면 펼침. 펼친 상태는 다시 그려도 유지
+  if (S.note) h += '<details class="note" id="note-d"' + (S.noteOpen ? ' open' : '') + '><summary><span class="nh">알려 드려요</span><span class="nprev">' + esc(S.note.split('\n')[0]) + '</span><span class="nmore">' + (S.noteOpen ? '접기' : '펼치기') + '</span></summary><p>' + linkify(S.note) + '</p></details>';
 
   // 새 요청 쓰기
   var busy = !!S.busy;
@@ -450,14 +453,14 @@ function untilFromDate(s) {
   var back = new Date(t - DAY + KST); return back.getUTCMonth() + 1 === +m[2] && back.getUTCDate() === +m[3] ? t : 0;   // 없는 날짜(2월 30일 등)는 0
 }
 function dateOfUntil(ms) { var d = new Date(ms - 1 + KST); /* 끝나는 때(밤 12시) 바로 앞 = 그날 */ return { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate(), w: '일월화수목금토'[d.getUTCDay()] }; }
-function periodHtml() {
-  var e = dateOfUntil(S.until), left = S.until - Date.now(), to = e.m + '월 ' + e.d + '일(' + e.w + ')까지';
-  if (left <= 0) return '<span class="nh">수정 기간</span><b>끝났습니다</b><span class="to">' + to + '였어요</span>';
+function periodText() {
+  var left = S.until - Date.now();
+  if (left <= 0) return '수정 기간 끝남';
   var dd = Math.floor(left / DAY), hh = Math.floor(left % DAY / 3600000);
-  var txt = dd ? dd + '일 ' + hh + '시간' : hh ? hh + '시간' : '1시간 안에 끝나요';
-  return '<span class="nh">수정 기간</span><b>' + txt + (dd || hh ? ' 남음' : '') + '</b><span class="to">' + to + '</span>';
+  return '수정 기간 ' + (dd ? dd + '일 ' + hh + '시간' : hh ? hh + '시간' : '1시간 안쪽');
 }
-setInterval(function () { var el = document.getElementById('period'); if (!el || !S.until) return; el.innerHTML = periodHtml(); el.classList.toggle('over', S.until <= Date.now()); }, 60000);
+document.addEventListener('toggle', function (e) { if (e.target.id !== 'note-d') return; S.noteOpen = e.target.open; var m = e.target.querySelector('.nmore'); if (m) m.textContent = S.noteOpen ? '접기' : '펼치기'; }, true);
+setInterval(function () { var el = document.getElementById('period'); if (el && S.until) el.textContent = periodText(); }, 60000);
 
 // ---------- 설정(제목을 10번 누르면) ----------
 var taps = 0, lastTap = 0;
@@ -472,7 +475,7 @@ function drawSheet(msg) {
   h += '<p>적으면 페이지 맨 위(새 요청 위)에 모두에게 보입니다. 비우고 저장하면 사라집니다.</p>';
   h += '<textarea id="sheet-note" maxlength="1000" placeholder="예: 이번 주는 회비 화면부터 고칩니다. 급한 건 카톡 주세요.">' + esc(S.sheetNote) + '</textarea>';
   h += '<h3 style="margin-top:18px">수정 기간</h3>';
-  h += '<p>끝나는 날을 숫자 8자리로 쓰면(예: 20261220) 그날 밤 12시까지 남은 시간이 페이지 맨 위에 \'29일 12시간 남음\'처럼 보입니다. 비우고 저장하면 사라집니다.</p>';
+  h += '<p>끝나는 날을 숫자 8자리로 쓰면(예: 20261220) 그날 밤 12시까지 남은 시간이 제목 옆에 작게 \'수정 기간 29일 12시간\'처럼 보입니다. 비우고 저장하면 사라집니다.</p>';
   h += '<input id="sheet-until" inputmode="numeric" maxlength="8" placeholder="20261220" value="' + esc(S.sheetUntil) + '" style="width:100%;height:44px;font-size:16px;border:1px solid var(--line);border-radius:8px;padding:0 12px">';
   h += '<h3 style="margin-top:18px">알림 시간</h3>';
   h += '<p>고른 시간(한국 시간, 정시)마다 그사이 들어온 새 요청 수를 휴대폰으로 한 번에 보냅니다. 새 요청이 없으면 보내지 않습니다. GitHub이 15분마다 확인하므로 정한 시간보다 15분쯤(붐비면 더) 늦게 올 수 있습니다.</p>';
@@ -599,6 +602,7 @@ function demoConnect() {
     del: function (id) { delete db[id]; push(); }
   };
   S.hours = '9,18'; S.until = Date.now() + 29 * DAY + 12.5 * 3600000;
+  S.note = '이번 주는 회비 화면부터 고칩니다. 급한 건 카톡 주세요.\n둘째 줄: 사진은 한 번에 10장까지 넣을 수 있어요.\n셋째 줄: 끝난 요청은 \'전체\'에서 다시 볼 수 있어요.';
   setTimeout(push, 100);
 }
 
