@@ -146,6 +146,7 @@
   details.note[open] .nprev { visibility: hidden; }
   details.note .md { margin-top: 8px; }
   .sheet-in textarea { min-height: 90px; }
+  .sheet-in .msg { min-height: 42px; }   /* 시험 알림 결과(두 줄까지)가 떠도 아래 글이 밀리지 않게 */
   .topic { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: var(--tint); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; word-break: break-all; color: var(--ink); }
 
   /* 조용한 유리(2026-11-20 저자 'B로'): 유리는 위 머리줄에만. 투명 줄이기 설정·못 그리는 브라우저는 단색 */
@@ -576,7 +577,12 @@ $sheet.addEventListener('click', function (e) {
   } else if (s === 'test') {
     if (DEMO || !NTFY) { drawSheet('시험 화면에서는 보내지 않습니다'); return; }
     fetch('https://ntfy.sh/' + NTFY, { method: 'POST', body: TITLE + ': 시험 알림입니다', headers: { Tags: 'bell', Click: location.href.split('?')[0] } })
-      .then(function () { drawSheet('보냈습니다. 휴대폰을 확인해 주세요'); }).catch(function () { drawSheet('보내지 못했어요'); });
+      // ntfy가 거절해도(429 하루 한도 등) fetch는 성공으로 끝나니 응답 번호를 본다(2026-11-20 '보냈습니다'인데 안 옴)
+      .then(function (r) {
+        if (r.ok) return drawSheet('보냈습니다. 휴대폰을 확인해 주세요');
+        drawSheet(r.status === 429 ? '못 보냈어요: 이 인터넷의 하루 알림 한도(250개)가 찼어요. 휴대폰 데이터로 바꿔 누르거나 내일 눌러 주세요'
+          : '보내지 못했어요(ntfy 응답 ' + r.status + ')');
+      }).catch(function () { drawSheet('보내지 못했어요: 인터넷 연결을 확인해 주세요'); });
   } else if (s === 'off') {
     S.admin = false; store('rq_admin', null); $sheet.classList.remove('on'); render();
   } else if (s === 'close') { $sheet.classList.remove('on'); }
