@@ -63,12 +63,21 @@ button { background: rgba(255, 255, 255, .7); border-color: rgba(255, 255, 255, 
 ul { background: rgba(255, 255, 255, .55) }
 .nums .hot { background: #0f6e43; color: #fff } .nums .hot b { color: #fff }
 @media (prefers-reduced-transparency: reduce) { .card { background: #fff; -webkit-backdrop-filter: none; backdrop-filter: none } }
+/* 불러오는 동안(2026-11-22 저자 "로딩중 이펙트"): 0.15초 안에 다 오면 안 보이고, 늦을 때만 돌이 + 빈 유리 카드가 반짝인다 */
+.loading { animation: ldin .25s .15s both; margin-top: 24px }
+.ld-head { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; margin-bottom: 12px }
+.spin { width: 16px; height: 16px; border: 2px solid rgba(15, 110, 67, .18); border-top-color: var(--main); border-radius: 50%; animation: spin .8s linear infinite; flex: none }
+.sk { min-height: 168px; border-radius: var(--r); border: 1px solid rgba(255, 255, 255, .88); background: linear-gradient(90deg, rgba(255,255,255,.4) 25%, rgba(255,255,255,.85) 50%, rgba(255,255,255,.4) 75%); background-size: 200% 100%; animation: shim 1.3s ease-in-out infinite }
+@keyframes ldin { from { opacity: 0 } to { opacity: 1 } }
+@keyframes spin { to { transform: rotate(360deg) } }
+@keyframes shim { from { background-position: 100% 0 } to { background-position: -100% 0 } }
+@media (prefers-reduced-motion: reduce) { .spin, .sk { animation: none } }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header><h1>질문·요청 페이지 모음</h1><span class="upd" id="upd">불러오는 중…</span><button id="again" type="button">새로 보기</button></header>
-  <div id="app"></div>
+  <div id="app"><div class="loading" role="status" aria-live="polite"><div class="ld-head"><span class="spin"></span>불러오는 중…</div><div class="grid"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div></div></div>
   <p class="foot">1분마다 저절로 새로 읽습니다. 페이지 목록은 GitHub 저장소 폴더, 답은 Firebase에서 읽습니다.</p>
 </div>
 <script>
@@ -88,35 +97,37 @@ function get(u) { return fetch(u, { cache: 'no-store' }).then(function (r) { if 
 function text(u) { return fetch(u, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.text() }) }
 function cut(s, n) { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s }
 
-// 페이지 목록: 저장소 맨 위 폴더 = 페이지 하나. 페이지 index.html 에서 제목·종류(질문/요청)를 읽는다
+// 페이지 목록은 projects.json 의 pages(새 질문 페이지.sh 가 만들 때 적음). 비었을 때만 GitHub 폴더 목록(1시간 60번 제한)을 읽는다.
+// 페이지마다 index.html(제목·종류)과 Firebase(답·질문 고친 판·요청)를 한꺼번에 받고, 다 오면 한 번에 그린다(2026-11-22 저자 "계단식으로 로딩됨").
 function loadPages() {
-  return Promise.all([
-    get('https://api.github.com/repos/' + OWNER + '/' + REPO + '/contents/').catch(function () { return [] }),
-    get('projects.json').catch(function () { return {} })
-  ]).then(function (r) {
-    projects = r[1] || {};
-    var dirs = (r[0] || []).filter(function (f) { return f.type === 'dir' && f.name[0] !== '.' }).map(function (f) { return f.name });
-    if (!dirs.length) dirs = Object.keys(projects.pages || {});   // GitHub 목록을 못 읽으면(1시간 60번 제한) 적어 둔 목록
-    return Promise.all(dirs.map(function (name) {
-      return text(name + '/index.html').then(function (h) {
-        var t = (h.match(/var TITLE = '((?:[^'\\]|\\.)*)'/) || [])[1] || name;
-        var k = (h.match(/var KIND = '(\w+)'/) || [])[1] || 'question';
-        return { name: name, title: t.replace(/\\(.)/g, '$1'), kind: k };
-      }).catch(function () { return null });
-    }));
-  }).then(function (list) { pages = list.filter(Boolean) });
+  return get('projects.json').catch(function () { return {} }).then(function (pj) {
+    projects = pj || {};
+    var dirs = Object.keys(projects.pages || {});
+    if (dirs.length) return dirs;
+    return get('https://api.github.com/repos/' + OWNER + '/' + REPO + '/contents/').then(function (l) {
+      return l.filter(function (f) { return f.type === 'dir' && f.name[0] !== '.' }).map(function (f) { return f.name });
+    }).catch(function () { return [] });
+  }).then(function (dirs) { return Promise.all(dirs.map(loadOne)) }).then(function (list) { pages = list.filter(Boolean) });
 }
 
-function loadOne(p) {
-  var base = DB + '/pages/' + p.name;
-  if (p.kind === 'request') return get(base + '/requests.json').then(function (rq) { p.reqs = rq || {}; p.err = '' }).catch(function (e) { p.err = '못 읽음(' + e.message + ')' });
+function loadOne(name) {
+  var base = DB + '/pages/' + name, p = { name: name, err: '' };
+  var bad = function (e) { p.err = '못 읽음(' + e.message + ')'; return null };
   return Promise.all([
+    text(name + '/index.html').catch(function () { return null }),
+    get(base + '/answers.json').catch(bad),
     get(base + '/qset/json.json').catch(function () { return null }),
-    get(base + '/answers.json').catch(function (e) { p.err = '답 못 읽음(' + e.message + ')'; return {} })
+    get(base + '/requests.json').catch(bad),
+    get(name + '/questions.json').catch(function () { return null })
   ]).then(function (r) {
-    var qs = r[0] ? JSON.parse(r[0]).questions : null;
-    return (qs ? Promise.resolve(qs) : get(p.name + '/questions.json?t=' + Date.now()).then(function (j) { return j.questions })).then(function (q) { p.qs = q; p.ans = r[1] || {} });
-  }).catch(function (e) { p.err = '못 읽음(' + e.message + ')' });
+    if (r[0] == null) return null;
+    var t = (r[0].match(/var TITLE = '((?:[^'\\]|\\.)*)'/) || [])[1] || name;
+    p.title = t.replace(/\\(.)/g, '$1'); p.kind = (r[0].match(/var KIND = '(\w+)'/) || [])[1] || 'question';
+    if (p.kind === 'request') { p.reqs = r[3] || {}; return p }
+    var qs = null; try { qs = r[2] ? JSON.parse(r[2]).questions : null } catch (e) {}
+    p.qs = qs || (r[4] && r[4].questions) || []; p.ans = r[1] || {};
+    return p;
+  });
 }
 
 function card(p) {
@@ -155,9 +166,9 @@ function render() {
   var d = new Date(); $('upd').textContent = d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0') + ' 기준';
 }
 
-function refresh() { return Promise.all((pages || []).map(loadOne)).then(render) }
-$('again').addEventListener('click', function () { $('upd').textContent = '읽는 중…'; loadPages().then(refresh) });
-loadPages().then(refresh);
+function refresh() { return loadPages().then(render) }
+$('again').addEventListener('click', function () { $('upd').textContent = '읽는 중…'; refresh() });
+refresh();
 setInterval(refresh, 60000);
 </script>
 </body>

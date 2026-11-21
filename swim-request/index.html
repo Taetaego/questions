@@ -163,6 +163,16 @@
   .warn.wait { background: var(--tint); color: var(--sub); }
   .st.s-doing { background: var(--doing-bg); color: var(--doing); font-weight: 600; }
   .st.s-done::before { content: "✓ "; }
+  /* 불러오는 동안(2026-11-22 저자 "로딩중 이펙트"): 0.15초 안에 다 오면 아예 안 보이고, 늦을 때만 돌이 + 빈 카드가 반짝인다 */
+  .loading { max-width: 640px; margin: 0 auto; padding: 28px 16px 0; animation: ldin .25s .15s both; }
+  .ld-head { display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--sub); font-size: 14px; margin-bottom: 18px; }
+  .spin { width: 16px; height: 16px; border: 2px solid rgba(34, 112, 74, .18); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+  .sk { border-radius: 14px; border: 1px solid rgba(22, 38, 29, .05); margin-bottom: 12px; background: linear-gradient(90deg, rgba(255,255,255,.5) 25%, rgba(255,255,255,.95) 50%, rgba(255,255,255,.5) 75%); background-size: 200% 100%; animation: shim 1.3s ease-in-out infinite; }
+  .sk.h1 { height: 120px; } .sk.h2 { height: 150px; } .sk.h3 { height: 96px; }
+  @keyframes ldin { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes shim { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+  @media (prefers-reduced-motion: reduce) { .spin, .sk { animation: none; } }
 </style>
 </head>
 <body>
@@ -189,6 +199,7 @@ var MAX_FILES = 10;               // 요청 하나에 넣는 첨부 개수
 var STATUS = { new: '새 요청', doing: '하는 중', done: '끝' };
 
 var DEMO = /[?&]demo\b/.test(location.search);
+var LOADING = '<div class="loading" role="status" aria-live="polite"><div class="ld-head"><span class="spin"></span>불러오는 중…</div><div class="sk h1"></div><div class="sk h2"></div><div class="sk h3"></div></div>';
 var S = { got: {}, slow: false, ed: {}, mine: [], note: '', sheetNote: '', rOpen: {}, rDraft: {}, rBusy: {}, name: '', reqs: {}, live: false, filter: 'open', text: '', files: [], busy: '', err: '', admin: false, hours: '', sheetHours: null, until: 0, sheetUntil: '', screens: '', sheetScreens: '', screen: '' };
 var $app = document.getElementById('app'), $pick = document.getElementById('pick'), $viewer = document.getElementById('viewer'), $sheet = document.getElementById('sheet');
 var fb = null;
@@ -433,7 +444,7 @@ async function esave(id) {
 // 요청·안내 글·기간·화면 목록이 다 올 때까지 그리지 않는다: 칸이 하나씩 끼어드는 단계 로딩을 없앰(2026-11-21). 4초 넘게 안 오면 있는 것부터 그린다
 function ready() { return (S.live && (DEMO || (S.got.note && S.got.until && S.got.screens))) || S.slow; }
 function render() {
-  if (!ready()) { $app.innerHTML = '<div class="gate"><p>불러오는 중…</p></div>'; return; }
+  if (!ready()) { $app.innerHTML = LOADING; return; }
   var act = document.activeElement, focusId = act && act.tagName === 'TEXTAREA' ? act.id : '', sel = focusId ? [act.selectionStart, act.selectionEnd] : null;
   var y = window.scrollY;
   var all = Object.keys(S.reqs).map(function (k) { return Object.assign({ id: k }, S.reqs[k]); }).sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
