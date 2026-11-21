@@ -1,9 +1,11 @@
 {
  "projects": {
-  "swim": "울산 수영 클럽 (팀준)"
+  "swim": "울산 수영 클럽 (팀준)",
+  "swimrace": "수영 레이스 분석"
  },
  "pages": {
   "swim-question": "",
-  "swim-request": ""
+  "swim-request": "",
+  "swimrace-request": ""
  }
 }
