@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <title>팀준 운영진 질문</title>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js">
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js">
 <style>
   :root {
     --bg: #eef3ef; --card: #fff; --ink: #16261d; --sub: #56655c; --line: #dde7e0; --tint: #f2f5f3;
@@ -354,8 +356,9 @@ async function connect() {
          delBlob: function (fid) { return d.remove(d.ref(db, 'pages/' + PAGE + '/blobs/' + fid)).catch(function () {}); } };
   fb.saveQs = function (v) { return d.set(d.ref(db, 'pages/' + PAGE + '/qset'), v); };
   d.onValue(d.ref(db, 'pages/' + PAGE + '/qset/json'), function (snap) {
-    var j = snap.val(); if (!j) return;
-    try { var o = JSON.parse(j); S.qs = o.questions || []; S.notice = o.notice || []; S.fromFb = true; render(); } catch (e) {}
+    var j = snap.val(); S.gotQset = true;
+    if (j) try { var o = JSON.parse(j); S.qs = o.questions || []; S.notice = o.notice || []; S.fromFb = true; } catch (e) {}
+    render();
   });
   d.onValue(fb.ref(), function (snap) { S.answers = snap.val() || {}; S.live = true; render(); },
     function (err) { toast('답을 불러오지 못했습니다: ' + err.message); });
@@ -402,8 +405,10 @@ async function saveAnswer(id, text, base, force) {
 }
 
 // ---------- 화면 ----------
+// 질문·답·질문 고친 판(qset)이 다 올 때까지 카드를 그리지 않는다: 카드가 먼저 뜨고 답이 하나씩 채워지는 단계 로딩을 없앰(2026-11-21). 4초 넘게 안 오면 있는 것부터 그린다
+function ready() { return S.qs && ((S.live && (S.gotQset || DEMO)) || S.slow); }
 function render() {
-  if (!S.qs) { $app.innerHTML = '<div class="gate"><p>불러오는 중…</p></div>'; return; }
+  if (!ready()) { $app.innerHTML = '<div class="gate"><p>불러오는 중…</p></div>'; return; }
   var act = document.activeElement, actId = act && act.dataset ? act.dataset.id : null, elId = act && act.id && /^qe-/.test(act.id) ? act.id : '';
   var sel = actId || elId ? [act.selectionStart, act.selectionEnd] : null;
   var y = window.scrollY;
@@ -693,9 +698,12 @@ var DEMO_QS = { notice: ['https://example.com/', '시험용 안내 글입니다.
 // ---------- 시작 ----------
 S.name = load('qp_name'); S.admin = load('qp_admin') === '1';
 render();
+// questions.json 과 Firebase 연결을 함께 시작한다(차례로 하면 그만큼 늦다)
+setTimeout(function () { if (S.dead) return; S.slow = true; render(); }, 4000);
+connect().catch(function (err) { S.slow = true; toast('답을 불러오지 못했습니다: ' + (err && err.message)); render(); });
 (DEMO ? Promise.resolve(DEMO_QS) : fetch('questions.json', { cache: 'no-cache' }).then(function (r) { return r.json(); }))
-  .then(function (d) { S.qs = d.questions; S.notice = d.notice || []; render(); return connect(); })
-  .catch(function (err) { $app.innerHTML = '<div class="gate"><p>불러오지 못했습니다: ' + esc(err && err.message) + '</p></div>'; });
+  .then(function (d) { if (!S.fromFb) { S.qs = d.questions; S.notice = d.notice || []; } render(); })
+  .catch(function (err) { if (!S.qs) { S.dead = true; $app.innerHTML = '<div class="gate"><p>불러오지 못했습니다: ' + esc(err && err.message) + '</p></div>'; } });
 window.__qp = { S: S, demo: function () { return demo; }, addFiles: addFiles }; // 점검용
 </script>
 </body>

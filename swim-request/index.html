@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <title>팀준 요청</title>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js">
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js">
 <style>
   :root {
     --bg: #eef3ef; --card: #fff; --ink: #16261d; --sub: #56655c; --line: #dde7e0; --tint: #f2f5f3;
@@ -173,7 +175,7 @@
 //   pages/<PAGE>/requests/<id> = { text, by, at, status: new|doing|done, screen(고른 화면 이름), seen: { by, at }(끝난 요청을 쓴 쪽이 '확인했어요' 누름), reply: { text, at }(처리 답글, 관리 기기에서만 씀), files: { <fid>: { name, type, size, w, h, t(작은 사진) } } }
 //   pages/<PAGE>/blobs/<fid>   = { d: 원본(data URL) }  ← 크게 볼 때만 불러온다
 //   pages/<PAGE>/settings      = { hours: "9,18", note, until } (until: 수정 기간이 끝나는 때, 밀리초. 2026-11-20 저자 '한 달 수정 타이머') ← 모아 받는 알림 시간(한국 시간, 정시)과 맨 위 한마디. 제목을 10번 누르면 나오는 설정 화면에서 바꾼다
-// 알림: 저장소의 .github/request_digest.py(GitHub Actions, 15분마다)가 정한 시간이 지나면 그사이 새 요청 수를 ntfy로 한 번 보낸다.
+// 알림: 저장소의 .github/request_digest.py(맥 launchd 1분마다 + GitHub Actions 15분마다 대신)가 정한 시간이 지나면 그사이 들어온, 아직 '새 요청'인 것의 수를 ntfy로 한 번 보낸다.
 // 아래 값은 '새 질문 페이지.sh 요청'이 채운다.
 var KIND = 'request';
 var TITLE = '팀준 요청';
@@ -187,7 +189,7 @@ var MAX_FILES = 10;               // 요청 하나에 넣는 첨부 개수
 var STATUS = { new: '새 요청', doing: '하는 중', done: '끝' };
 
 var DEMO = /[?&]demo\b/.test(location.search);
-var S = { ed: {}, mine: [], note: '', sheetNote: '', rOpen: {}, rDraft: {}, rBusy: {}, name: '', reqs: {}, live: false, filter: 'open', text: '', files: [], busy: '', err: '', admin: false, hours: '', sheetHours: null, until: 0, sheetUntil: '', screens: '', sheetScreens: '', screen: '' };
+var S = { got: {}, slow: false, ed: {}, mine: [], note: '', sheetNote: '', rOpen: {}, rDraft: {}, rBusy: {}, name: '', reqs: {}, live: false, filter: 'open', text: '', files: [], busy: '', err: '', admin: false, hours: '', sheetHours: null, until: 0, sheetUntil: '', screens: '', sheetScreens: '', screen: '' };
 var $app = document.getElementById('app'), $pick = document.getElementById('pick'), $viewer = document.getElementById('viewer'), $sheet = document.getElementById('sheet');
 var fb = null;
 
@@ -376,9 +378,9 @@ async function connect() {
   d.onValue(R('requests'), function (s) { S.reqs = s.val() || {}; S.live = true; render(); },
     function (err) { toast('요청을 불러오지 못했습니다: ' + err.message); });
   d.onValue(R('settings/hours'), function (s) { S.hours = s.val() || ''; });
-  d.onValue(R('settings/note'), function (s) { S.note = s.val() || ''; render(); });
-  d.onValue(R('settings/until'), function (s) { S.until = s.val() || 0; render(); });
-  d.onValue(R('settings/screens'), function (s) { S.screens = s.val() || ''; render(); });
+  d.onValue(R('settings/note'), function (s) { S.note = s.val() || ''; S.got.note = 1; render(); });
+  d.onValue(R('settings/until'), function (s) { S.until = s.val() || 0; S.got.until = 1; render(); });
+  d.onValue(R('settings/screens'), function (s) { S.screens = s.val() || ''; S.got.screens = 1; render(); });
 }
 
 async function send() {
@@ -428,7 +430,10 @@ async function esave(id) {
 }
 
 // ---------- 화면 ----------
+// 요청·안내 글·기간·화면 목록이 다 올 때까지 그리지 않는다: 칸이 하나씩 끼어드는 단계 로딩을 없앰(2026-11-21). 4초 넘게 안 오면 있는 것부터 그린다
+function ready() { return (S.live && (DEMO || (S.got.note && S.got.until && S.got.screens))) || S.slow; }
 function render() {
+  if (!ready()) { $app.innerHTML = '<div class="gate"><p>불러오는 중…</p></div>'; return; }
   var act = document.activeElement, focusId = act && act.tagName === 'TEXTAREA' ? act.id : '', sel = focusId ? [act.selectionStart, act.selectionEnd] : null;
   var y = window.scrollY;
   var all = Object.keys(S.reqs).map(function (k) { return Object.assign({ id: k }, S.reqs[k]); }).sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
@@ -553,7 +558,7 @@ function drawSheet(msg) {
   h += '<p>끝나는 날을 숫자 8자리로 쓰면(예: 20261220) 그날 밤 12시까지 남은 시간이 제목 옆에 작게 \'수정 기간 29일 12시간\'처럼 보입니다. 비우고 저장하면 사라집니다.</p>';
   h += '<input id="sheet-until" inputmode="numeric" maxlength="8" placeholder="20261220" value="' + esc(S.sheetUntil) + '" style="width:100%;height:44px;font-size:16px;border:1px solid var(--line);border-radius:8px;padding:0 12px">';
   h += '<h3 style="margin-top:18px">알림 시간</h3>';
-  h += '<p>고른 시간(한국 시간, 정시)마다 그사이 들어온 새 요청 수를 휴대폰으로 한 번에 보냅니다. 새 요청이 없으면 보내지 않습니다. GitHub이 15분마다 확인하므로 정한 시간보다 15분쯤(붐비면 더) 늦게 올 수 있습니다.</p>';
+  h += '<p>고른 시간(한국 시간, 정시)마다 그사이 들어온 새 요청 수를 휴대폰으로 한 번에 보냅니다. 새 요청이 없으면 보내지 않습니다. \'하는 중\'·\'끝\'으로 바꾼 요청은 알림 개수에 넣지 않습니다. 맥이 1분마다 확인해 정한 시간에 맞춰 보내고, 맥이 모두 꺼져 있으면 GitHub이 대신 보내 늦을 수 있습니다.</p>';
   h += '<div class="hours">';
   for (var i = 0; i < 24; i++) h += '<button data-s="hour" data-v="' + i + '" class="' + (hs.indexOf(i) >= 0 ? 'on' : '') + '">' + i + '시</button>';
   h += '</div><p>' + (hs.length ? '지금 고른 시간: 매일 ' + hs.map(function (x) { return x + '시'; }).join(' · ') : '고른 시간이 없어 알림이 가지 않습니다.') + '</p>';
@@ -697,7 +702,8 @@ function demoConnect() {
 S.name = load('qp_name'); S.text = load('rq_draft'); S.admin = load('rq_admin') === '1';
 try { S.mine = JSON.parse(load('rq_mine') || '[]'); } catch (e) { S.mine = []; }
 render();
-connect().catch(function (err) { $app.innerHTML = '<div class="gate"><p>불러오지 못했습니다: ' + esc(err && err.message) + '</p></div>'; });
+setTimeout(function () { if (S.dead) return; S.slow = true; render(); }, 4000);
+connect().catch(function (err) { S.dead = true; $app.innerHTML = '<div class="gate"><p>불러오지 못했습니다: ' + esc(err && err.message) + '</p></div>'; });
 window.__rq = { S: S, demo: function () { return demo; }, addFiles: addFiles }; // 점검용
 </script>
 </body>
