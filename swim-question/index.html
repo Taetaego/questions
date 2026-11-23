@@ -47,6 +47,7 @@
   .notice[open] summary::after { content: "접기"; }
   .notice .body { padding: 0 16px 14px; font-size: 14px; white-space: pre-wrap; color: var(--sub); }
   .notice a { color: var(--accent); }
+  .pvnote { margin: 12px 0 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: 13px; color: var(--sub); }   /* 개인정보 안내: 늘 보임(2026-11-23) */
   .md { white-space: normal; }
   div.md p, div.md ul, div.md ol, div.md blockquote, div.md h4 { margin: 0 0 10px; white-space: normal; }   /* div.md: .note p 같은 앞 규칙보다 이기게 */
   div.md > :last-child { margin-bottom: 0; }
@@ -442,6 +443,8 @@ function render() {
   if (S.notice.length) {
     h += '<details class="notice" open><summary>먼저 읽어 주세요</summary><div class="body">' + md(S.notice.join('\n\n')) + '</div></details>';
   }
+  // 개인정보 안내는 '먼저 읽어 주세요'(질문 목록에서 오는 글)와 따로, 늘 보이게 고정(2026-11-23 저자 '1번만 넣고')
+  h += '<div class="pvnote">이 페이지의 답은 링크를 아는 분이면 누구나 볼 수 있어요. 회원 개인정보(이름·연락처·생년월일)는 적지 말아 주세요 🙏</div>';
   var shown = items.filter(function (q) { return S.filter === 'all' || !hasAns(ans(q.id)) || S.open[q.id]; });
   if (!shown.length) h += '<div class="empty-all">모든 질문에 답이 달렸습니다. 고마워요!<br><br><button class="btn" data-act="filter" data-v="all">전체 답 보기</button></div>';
   var lastCat = null;
