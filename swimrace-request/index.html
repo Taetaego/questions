@@ -166,13 +166,16 @@
   /* 불러오는 동안(2026-11-22 저자 "로딩중 이펙트"): 0.15초 안에 다 오면 아예 안 보이고, 늦을 때만 돌이 + 빈 카드가 반짝인다 */
   .loading { max-width: 640px; margin: 0 auto; padding: 28px 16px 0; animation: ldin .25s .15s both; }
   .ld-head { display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--sub); font-size: 14px; margin-bottom: 18px; }
-  .spin { width: 16px; height: 16px; border: 2px solid rgba(34, 112, 74, .18); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+  /* 진행 중 원호: TaeKit Busy(Sources/TaeKit/Controls.swift)와 같은 움직임 — 1.4초 주기로 머리가 72%까지 뻗고 꼬리가 따라붙으며, 전체는 1.23초에 한 바퀴 */
+  .spin { width: 16px; height: 16px; flex: none; animation: spin 1.23s linear infinite; }
+  .spin circle { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 100; animation: arc 1.4s ease-in-out infinite; }
+  @keyframes arc { 0% { stroke-dasharray: 6 100; stroke-dashoffset: 0; } 50% { stroke-dasharray: 78 100; stroke-dashoffset: 0; } 100% { stroke-dasharray: 6 100; stroke-dashoffset: -72; } }
   .sk { border-radius: 14px; border: 1px solid rgba(22, 38, 29, .05); margin-bottom: 12px; background: linear-gradient(90deg, rgba(255,255,255,.5) 25%, rgba(255,255,255,.95) 50%, rgba(255,255,255,.5) 75%); background-size: 200% 100%; animation: shim 1.3s ease-in-out infinite; }
   .sk.h1 { height: 120px; } .sk.h2 { height: 150px; } .sk.h3 { height: 96px; }
   @keyframes ldin { from { opacity: 0; } to { opacity: 1; } }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes shim { from { background-position: 100% 0; } to { background-position: -100% 0; } }
-  @media (prefers-reduced-motion: reduce) { .spin, .sk { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .spin, .spin circle, .sk { animation: none; } }
 </style>
 </head>
 <body>
@@ -199,7 +202,7 @@ var MAX_FILES = 10;               // 요청 하나에 넣는 첨부 개수
 var STATUS = { new: '새 요청', doing: '하는 중', done: '끝' };
 
 var DEMO = /[?&]demo\b/.test(location.search);
-var LOADING = '<div class="loading" role="status" aria-live="polite"><div class="ld-head"><span class="spin"></span>불러오는 중…</div><div class="sk h1"></div><div class="sk h2"></div><div class="sk h3"></div></div>';
+var LOADING = '<div class="loading" role="status" aria-live="polite"><div class="ld-head"><svg class="spin" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" pathLength="100"/></svg>불러오는 중…</div><div class="sk h1"></div><div class="sk h2"></div><div class="sk h3"></div></div>';
 var S = { got: {}, slow: false, ed: {}, mine: [], note: '', sheetNote: '', rOpen: {}, rDraft: {}, rBusy: {}, name: '', reqs: {}, live: false, filter: 'open', text: '', files: [], busy: '', err: '', admin: false, hours: '', sheetHours: null, until: 0, sheetUntil: '', screens: '', sheetScreens: '', screen: '' };
 var $app = document.getElementById('app'), $pick = document.getElementById('pick'), $viewer = document.getElementById('viewer'), $sheet = document.getElementById('sheet');
 var fb = null;
