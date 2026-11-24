@@ -9,6 +9,8 @@
      이미 '하는 중'·'끝'으로 바꾼 요청은 알리지 않는다(2026-11-21 저자 "이미 수정하고 끝냈는데 새 요청이라고 옴").
   4. 보내기 전에 sent = slot 을 '아무도 먼저 안 적었을 때만' 적는다(Firebase ETag). 맥 두 대와 GitHub가 같은 분에 돌아도 한 곳만 보낸다.
      새 요청이 없어도 적는다. 보내기에 실패하면 sent 를 되돌려 다음 번에 다시 보낸다.
+질문 페이지(같은 폴더에 questions.json이 있는 페이지)도 같은 방식으로 돈다(2026-11-25 저자 "답이 달릴 때마다가 아니라 내가 선택한 시간에만"):
+  그 페이지 설정 화면(제목을 10번 누름)에서 고른 시간마다, 그사이 새로 달리거나 고쳐진 답(answers/<질문>/at) 수를 한 번 보낸다. 답 글은 보내지 않는다.
 손으로 돌리기: python3 -I .github/request_digest.py [보기]   ← '보기'면 보내지도 적지도 않고 결과만 찍는다.
 """
 import json, os, re, sys, urllib.error, urllib.request
@@ -52,7 +54,7 @@ def slots(hours, now):
     return sorted(out)
 
 
-def run(page_dir, now):
+def run(page_dir, now, question=False):
     html = (page_dir / "index.html").read_text(encoding="utf-8")
     title, page, db, ntfy = var(html, "TITLE"), var(html, "PAGE"), var(html, "DB_URL").rstrip("/"), var(html, "NTFY")
     base = f"pages/{page}"
@@ -67,11 +69,25 @@ def run(page_dir, now):
     if sent >= slot:
         return f"{page}: 이번 시각({datetime.fromtimestamp(slot / 1000, KST):%m-%d %H시}) 이미 처리"
     start = sent if sent else (past[-2] if len(past) > 1 else slot - 86400000)
-    reqs = get(db, base + "/requests") or {}
-    fresh = lambda r: isinstance(r, dict) and (r.get("status") or "new") == "new"
-    new = [r for r in reqs.values() if fresh(r) and start < (r.get("at") or 0) <= slot]
-    left = sum(1 for r in reqs.values() if fresh(r))
-    msg = f"{page}: 처리 안 된 새 요청 {len(new)}개, 전체 처리 안 된 요청 {left}개"
+    if question:
+        qs = [q["id"] for q in json.loads((page_dir / "questions.json").read_text(encoding="utf-8"))["questions"]]
+        qj = get(db, base + "/qset/json")  # 페이지에서 운영진이 질문을 고쳤으면 이것이 질문 원본
+        if qj:
+            qs = [q["id"] for q in json.loads(qj)["questions"]]
+        ans = get(db, base + "/answers") or {}
+        has = lambda a: isinstance(a, dict) and bool(a.get("answer") or a.get("files"))
+        new = [i for i in qs if has(ans.get(i)) and start < (ans[i].get("at") or 0) <= slot]
+        done = sum(1 for i in qs if has(ans.get(i)))
+        text = f"새로 달리거나 고쳐진 답 {len(new)}개 · 답 {done}/{len(qs)}" + (" (다 참)" if done == len(qs) else "")
+        tag = "speech_balloon"
+    else:
+        reqs = get(db, base + "/requests") or {}
+        fresh = lambda r: isinstance(r, dict) and (r.get("status") or "new") == "new"
+        new = [r for r in reqs.values() if fresh(r) and start < (r.get("at") or 0) <= slot]
+        left = sum(1 for r in reqs.values() if fresh(r))
+        text = f"처리 안 된 새 요청 {len(new)}개 · 전체 처리 안 된 요청 {left}개"
+        tag = "inbox_tray"
+    msg = f"{page}: {text}"
     if DRY:
         return msg + " (보기: 안 보냄)"
     url = f"{db}/{base}/digest/sent.json"
@@ -84,7 +100,7 @@ def run(page_dir, now):
     if new and ntfy:
         owner = os.environ.get("GITHUB_REPOSITORY", "taetaego/questions").split("/")
         link = f"https://{owner[0].lower()}.github.io/{owner[1]}/{page_dir.name}/"
-        body = {"topic": ntfy, "title": title, "message": f"처리 안 된 새 요청 {len(new)}개 · 전체 처리 안 된 요청 {left}개", "tags": ["inbox_tray"], "click": link}
+        body = {"topic": ntfy, "title": title, "message": text, "tags": [tag], "click": link}
         try:
             req("https://ntfy.sh/", data=json.dumps(body, ensure_ascii=False).encode(), method="POST", headers={"Content-Type": "application/json"})
         except Exception:
@@ -96,13 +112,14 @@ def run(page_dir, now):
 
 def main():
     now = datetime.now(timezone.utc)
-    pages = [p.parent for p in sorted(ROOT.glob("*/index.html")) if "var KIND = 'request'" in p.read_text(encoding="utf-8")]
+    pages = [(p.parent, False) for p in sorted(ROOT.glob("*/index.html")) if "var KIND = 'request'" in p.read_text(encoding="utf-8")]
+    pages += [(p.parent, True) for p in sorted(ROOT.glob("*/questions.json")) if (p.parent / "index.html").exists()]
     if not pages:
-        print("요청 페이지 없음")
+        print("요청·질문 페이지 없음")
     bad = 0
-    for p in pages:
+    for p, question in pages:
         try:
-            print(run(p, now))
+            print(run(p, now, question))
         except Exception as e:  # 한 페이지가 실패해도 다른 페이지는 돈다
             bad += 1
             print(f"{p.name}: 실패 {e!r}")

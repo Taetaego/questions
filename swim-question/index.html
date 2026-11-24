@@ -90,6 +90,10 @@
   .sheet-x { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 18px;
     background: #fff; color: var(--ink); font-size: 16px; padding: 0; line-height: 34px; text-align: center; }
   .sheet-in p { margin: 6px 0; font-size: 14px; color: var(--sub); }
+  .hours { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 10px 0; }
+  .hours button { height: 40px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font-size: 14px; padding: 0; }
+  .hours button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .topic { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; word-break: break-all; color: var(--ink); }
   .note { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--accent-soft); border-radius: 12px; padding: 12px 16px; margin-top: 16px; }
   .note .nh { font-size: 13px; color: var(--sub); font-weight: 600; margin-bottom: 2px; }
   .note p { margin: 0; white-space: pre-wrap; }
@@ -186,7 +190,7 @@
 var TITLE = '팀준 운영진 질문';
 var PAGE = 'swim-question';          // Firebase 안에서 이 페이지 답이 들어가는 칸 이름 (pages/<PAGE>/answers)
 var DB_URL = 'https://question-pages-45aae-default-rtdb.asia-southeast1.firebasedatabase.app';          // Firebase Realtime Database 주소
-var NTFY = 'b9cebeb56f548330-swim-question';          // 마지막 빈 질문에 답을 저장하는 순간 알림을 보낼 ntfy 주제(ntfy.sh/<주제>). 비면 안 보냄
+var NTFY = 'b9cebeb56f548330-swim-question';          // 고른 시간마다 그사이 달린 답 수를 모아 보낼 ntfy 주제(ntfy.sh/<주제>). 보내는 쪽은 저장소 .github/request_digest.py. 비면 안 보냄
 var EDITING_MS = 5 * 60000;     // '작성 중' 표시가 저절로 풀리는 시간
 var MAX_SIDE = 3000;              // 사진 긴 변 최대(px). 스크린샷은 원본 크기 그대로 두어 글자가 읽힌다
 var MAX_FILE = 5 * 1024 * 1024;   // 사진이 아닌 파일 한 개 최대 크기
@@ -194,7 +198,7 @@ var MAX_FILES = 10;               // 답 하나에 넣는 첨부 개수
 
 var DEMO = /[?&]demo\b/.test(location.search);
 var LOADING = '<div class="loading" role="status" aria-live="polite"><div class="ld-head"><svg class="spin" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" pathLength="100"/></svg>불러오는 중…</div><div class="sk h1"></div><div class="sk h2"></div><div class="sk h3"></div></div>';
-var S = { admin: false, qe: {}, qerr: {}, fromFb: false, sheetNotice: '', name: '', qs: null, notice: [], answers: {}, filter: 'all', open: {}, drafts: {}, dfiles: {}, bfiles: {}, bwas: {}, bases: {}, conflict: {}, busy: {}, err: {}, live: false };
+var S = { hours: '', sheetHours: [], admin: false, qe: {}, qerr: {}, fromFb: false, sheetNotice: '', name: '', qs: null, notice: [], answers: {}, filter: 'all', open: {}, drafts: {}, dfiles: {}, bfiles: {}, bwas: {}, bases: {}, conflict: {}, busy: {}, err: {}, live: false };
 var $app = document.getElementById('app'), $pick = document.getElementById('pick'), $viewer = document.getElementById('viewer'), $sheet = document.getElementById('sheet');
 var fb = null; // { db, ref, set, remove, onValue, runTransaction, onDisconnect }
 
@@ -370,6 +374,9 @@ async function connect() {
          getBlob: function (fid) { return d.get(d.ref(db, 'pages/' + PAGE + '/blobs/' + fid + '/d')).then(function (s) { return s.val(); }); },
          delBlob: function (fid) { return d.remove(d.ref(db, 'pages/' + PAGE + '/blobs/' + fid)).catch(function () {}); } };
   fb.saveQs = function (v) { return d.set(d.ref(db, 'pages/' + PAGE + '/qset'), v); };
+  // 알림 시간(한국 시간 정시, "9,18" 꼴): pages/<PAGE>/settings/hours. 저장소 .github/request_digest.py가 읽는다
+  fb.setHours = function (h) { return d.set(d.ref(db, 'pages/' + PAGE + '/settings/hours'), h); };
+  d.onValue(d.ref(db, 'pages/' + PAGE + '/settings/hours'), function (snap) { S.hours = snap.val() || ''; });
   d.onValue(d.ref(db, 'pages/' + PAGE + '/qset/json'), function (snap) {
     var j = snap.val(); S.gotQset = true;
     if (j) try { var o = JSON.parse(j); S.qs = o.questions || []; S.notice = o.notice || []; S.fromFb = true; } catch (e) {}
@@ -567,8 +574,9 @@ function qsave(key) {
   saveQs(list, S.notice).then(function () { delete S.qe[key]; delete S.qerr[key]; toast(key === '__new' ? '질문을 더했습니다' : '질문을 저장했습니다'); render(); })
     .catch(function (err) { S.qerr[key] = '저장하지 못했어요: ' + err.message; render(); });
 }
+function hourList(s) { return String(s || '').split(',').filter(Boolean).map(Number).filter(function (h) { return h >= 0 && h < 24; }).sort(function (a, b) { return a - b; }); }
 function openSheet() {
-  S.admin = true; store('qp_admin', '1'); S.sheetNotice = S.notice.join('\n\n'); render(); drawSheet(); $sheet.classList.add('on');
+  S.admin = true; store('qp_admin', '1'); S.sheetNotice = S.notice.join('\n\n'); S.sheetHours = hourList(S.hours); render(); drawSheet(); $sheet.classList.add('on');
 }
 function drawSheet(msg) {
   var h = '<div class="sheet-in"><button class="sheet-x" data-s="close" aria-label="닫기">✕</button><h3>운영진 모드</h3>';
@@ -577,6 +585,15 @@ function drawSheet(msg) {
   h += '<textarea id="sheet-notice" maxlength="5000">' + esc(S.sheetNotice) + '</textarea>';
   h += '<div class="row"><button class="btn main" data-s="save">글 저장</button><button class="btn push" data-s="close">닫기</button></div>';
   h += '<div class="msg">' + esc(msg || '') + '</div>';
+  var hs = S.sheetHours;
+  h += '<h3 style="margin-top:18px">알림 시간</h3>';
+  h += '<p>고른 시간(한국 시간, 정시)마다 그사이 새로 달리거나 고쳐진 답 수를 휴대폰으로 한 번에 보냅니다. 그사이 답이 없으면 보내지 않습니다. 맥이 1분마다 확인해 정한 시간에 맞춰 보내고, 맥이 모두 꺼져 있으면 GitHub이 대신 보내 늦을 수 있습니다.</p>';
+  h += '<div class="hours">';
+  for (var i = 0; i < 24; i++) h += '<button data-s="hour" data-v="' + i + '" class="' + (hs.indexOf(i) >= 0 ? 'on' : '') + '">' + i + '시</button>';
+  h += '</div><p>' + (hs.length ? '지금 고른 시간: 매일 ' + hs.map(function (x) { return x + '시'; }).join(' · ') : '고른 시간이 없어 알림이 가지 않습니다.') + '</p>';
+  h += '<div class="row"><button class="btn main" data-s="hsave">시간 저장</button><button class="btn" data-s="test">시험 알림 보내기</button></div>';
+  h += '<div class="msg">' + esc(S.hmsg || '') + '</div>';
+  h += '<p style="margin-top:14px">휴대폰 ntfy 앱에서 아래 주제를 구독하면 알림을 받습니다.</p><div class="topic">' + esc(NTFY) + '</div>';
   h += '<div class="row" style="margin-top:14px"><button class="btn" data-s="off">이 기기에서 운영진 모드 끄기</button></div>';
   $sheet.innerHTML = h + '</div>';
 }
@@ -584,7 +601,22 @@ $sheet.addEventListener('input', function (e) { if (e.target.id === 'sheet-notic
 $sheet.addEventListener('click', function (e) {
   var b = e.target.closest('[data-s]'); if (!b) return;
   var s = b.dataset.s;
-  if (s === 'save') {
+  S.hmsg = '';
+  var hdone = function (m) { S.hmsg = m; drawSheet(); };
+  if (s === 'hour') {
+    var v = +b.dataset.v, hi = S.sheetHours.indexOf(v);
+    if (hi >= 0) S.sheetHours.splice(hi, 1); else S.sheetHours.push(v);
+    S.sheetHours.sort(function (a, b) { return a - b; }); drawSheet();
+  } else if (s === 'hsave') {
+    var val = S.sheetHours.join(',');
+    (DEMO ? Promise.resolve() : fb.setHours(val)).then(function () { S.hours = val; hdone('저장했습니다'); }).catch(function (err) { hdone('저장하지 못했어요: ' + err.message); });
+  } else if (s === 'test') {
+    if (DEMO || !NTFY) { hdone('시험 화면에서는 보내지 않습니다'); return; }
+    // ntfy가 거절해도(429 하루 한도 등) fetch는 성공으로 끝나니 응답 번호를 본다
+    fetch('https://ntfy.sh/' + NTFY, { method: 'POST', body: TITLE + ': 시험 알림입니다', headers: { Tags: 'bell', Click: location.href.split('?')[0] } })
+      .then(function (r) { hdone(r.ok ? '보냈습니다. 휴대폰을 확인해 주세요' : r.status === 429 ? '못 보냈어요: 이 인터넷의 하루 알림 한도(250개)가 찼어요' : '보내지 못했어요(ntfy 응답 ' + r.status + ')'); })
+      .catch(function () { hdone('보내지 못했어요: 인터넷 연결을 확인해 주세요'); });
+  } else if (s === 'save') {
     var notice = S.sheetNotice.split(/\n\s*\n/).map(function (x) { return x.trim(); }).filter(Boolean);
     saveQs(S.qs, notice).then(function () { S.notice = notice; render(); drawSheet('저장했습니다'); }).catch(function (err) { drawSheet('저장하지 못했어요: ' + err.message); });
   } else if (s === 'off') {
@@ -661,21 +693,13 @@ $app.addEventListener('click', function (e) {
   }
 });
 
-// 이 저장으로 빈 질문이 0개가 되면(전에 비어 있던 질문에 답을 넣었고, 나머지는 이미 다 참) 만든 사람 휴대폰에 ntfy 알림 한 번.
-// 답 내용은 보내지 않는다. 알림이 안 가도 저장에는 영향 없음.
-function notifyIfFull(id, before, after) {
-  if (DEMO || !NTFY || !S.qs || !after || before) return;
-  var left = S.qs.filter(function (q) { return q.id !== id && !hasAns(ans(q.id)); }).length;
-  if (left) return;
-  fetch('https://ntfy.sh/' + NTFY, { method: 'POST', body: TITLE + ': 질문 ' + S.qs.length + '개 답이 다 찼습니다', headers: { Tags: 'white_check_mark', Click: location.href.split('?')[0] } }).catch(function () {});
-}
-
+// 휴대폰 알림은 여기서 보내지 않는다. 고른 시간에만 저장소 .github/request_digest.py가 모아 보낸다(2026-11-25 저자 '내가 선택한 시간에만').
 function save(id, force) {
   S.busy[id] = true; render();
   var text = (S.drafts[id] || '').trim(), base = S.bases[id], after = !!(text || (S.dfiles[id] || []).length);
   saveAnswer(id, text, base, force).then(function (d) {
     S.busy[id] = false;
-    if (d.ok) { notifyIfFull(id, S.bwas[id], after); delete S.open[id]; delete S.drafts[id]; delete S.conflict[id]; delete S.dfiles[id]; toast('저장했습니다'); render(); return; }
+    if (d.ok) { delete S.open[id]; delete S.drafts[id]; delete S.conflict[id]; delete S.dfiles[id]; toast('저장했습니다'); render(); return; }
     S.conflict[id] = { answer: d.answer, by: d.by, files: d.files }; render();
   }).catch(function (err) { S.busy[id] = false; toast('저장 실패: ' + (err && err.message || '인터넷 연결을 확인해 주세요')); render(); });
 }
